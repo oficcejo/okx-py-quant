@@ -7,6 +7,13 @@
 - **回测引擎**：基于本地 K 线数据库回测策略
 - **实盘执行**：按监控周期运行策略，自动调用 OKX 下单
 - **AI 策略生成**：调用 OpenAI 兼容大模型（如 DeepSeek）从自然语言生成策略配置
+<img width="1873" height="917" alt="image" src="https://github.com/user-attachments/assets/8233098b-fc7d-44a3-a1dc-e88e317d6479" />
+<img width="1914" height="916" alt="image" src="https://github.com/user-attachments/assets/9e1e3df6-cbf2-4891-8cb8-d61f319b4e86" />
+<img width="1900" height="901" alt="image" src="https://github.com/user-attachments/assets/de998470-cce5-4b01-898d-a9d1f206e438" />
+<img width="1889" height="747" alt="image" src="https://github.com/user-attachments/assets/e6d93401-d57b-4570-ba5f-19203e065ed3" />
+
+
+
 
 
 ---
