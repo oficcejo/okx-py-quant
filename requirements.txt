@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+SQLAlchemy
+pydantic
+pydantic-settings
+alembic
+passlib[bcrypt]
+python-jose[cryptography]
+requests
+httpx
+pandas
+numpy
+apscheduler
