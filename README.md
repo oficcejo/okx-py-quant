@@ -2,7 +2,12 @@
 
 基于 **Python / FastAPI + React / TypeScript / Ant Design** 的现代化多因子量化交易与自动化回测执行系统。全面支持加密货币（Crypto）以及传统金融（TradFi）资产的大宗商品、贵金属、美股股票与指数 ETF 交易。
 
+<p align="center">
+  <img src="docs/images/backtest_report.png" alt="OKX 量化系统回测结果综合分析报告" width="95%" />
+</p>
+
 ---
+
 
 ## ✨ 核心特色与功能矩阵
 
