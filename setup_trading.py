@@ -4,7 +4,7 @@
 """
 from app.db.session import SessionLocal
 from app.models import Symbol, ExchangeAccount, User
-from passlib.hash import bcrypt
+import hashlib
 
 def setup():
     db = SessionLocal()
@@ -16,12 +16,14 @@ def setup():
     # 1. 创建用户
     user = db.query(User).filter(User.username == "admin").first()
     if not user:
+        pwd_hash = hashlib.sha256(b"admin123").hexdigest()
         user = User(
             username="admin",
-            password_hash=bcrypt.hash("admin123")
+            password_hash=pwd_hash
         )
         db.add(user)
         db.commit()
+
         print(f"✅ 创建用户: admin (ID: {user.id})")
     else:
         print(f"ℹ️  用户已存在: admin (ID: {user.id})")

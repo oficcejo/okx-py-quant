@@ -218,6 +218,7 @@ async def sync_klines(payload: KlineSyncRequest, db: Session = Depends(get_db)) 
 
 class KlineDataInfo(BaseModel):
     """K线数据统计信息"""
+    symbol_id: int
     inst_id: str
     timeframe: str
     count: int
@@ -257,6 +258,7 @@ def get_kline_stats(db: Session = Depends(get_db)) -> List[KlineDataInfo]:
             
             if stats and stats.count > 0:
                 results.append(KlineDataInfo(
+                    symbol_id=symbol.id,
                     inst_id=symbol.inst_id,
                     timeframe=tf,
                     count=stats.count,

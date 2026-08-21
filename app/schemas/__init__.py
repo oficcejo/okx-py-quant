@@ -76,12 +76,14 @@ class StrategyBase(BaseModel):
     symbol_id: int
     timeframe: str
     leverage: Optional[float] = None
-    monitor_interval_sec: int = Field(default=20, ge=1)
+    monitor_interval_sec: int = Field(default=60, ge=1)
     config_json: str
+    created_from_ai: bool = False
 
 
 class StrategyCreate(StrategyBase):
     pass
+
 
 
 class Strategy(StrategyBase):
@@ -98,9 +100,9 @@ class Strategy(StrategyBase):
 
 class BacktestBase(BaseModel):
     strategy_id: int
-    start_ts: datetime
-    end_ts: datetime
-    initial_balance: float
+    start_ts: Optional[datetime] = None
+    end_ts: Optional[datetime] = None
+    initial_balance: float = 10000.0
 
 
 class BacktestCreate(BacktestBase):
@@ -109,12 +111,15 @@ class BacktestCreate(BacktestBase):
 
 class Backtest(BacktestBase):
     id: int
+    start_ts: datetime
+    end_ts: datetime
     status: str
     result_json: Optional[str] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
 
 
 class BacktestTrade(BaseModel):

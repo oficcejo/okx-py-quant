@@ -141,20 +141,55 @@ class StrategyRuleSet(Dict[str, Any]):
 
 def evaluate_condition(cond: Condition, df: pd.DataFrame, idx: int) -> bool:
     try:
-        indicator_type = IndicatorType(cond["indicator_type"])
-        signal_type = SignalType(cond["signal_type"])
+        raw_indicator = cond.get("indicator_type") or cond.get("indicator") or ""
+        raw_signal = cond.get("signal_type") or cond.get("signal") or ""
+        raw_indicator_str = str(raw_indicator).strip().upper()
+        raw_signal_str = str(raw_signal).strip().upper()
+
+        # Handle common signal naming variations
+        if raw_signal_str in ("CROSSOVER", "GOLDEN_CROSS", "GOLDEN"):
+            if raw_indicator_str == "MACD":
+                raw_signal_str = "MACD_GOLDEN_CROSS"
+            elif raw_indicator_str == "RSI":
+                raw_signal_str = "RSI_GOLDEN_CROSS"
+            elif raw_indicator_str == "KDJ":
+                raw_signal_str = "KDJ_GOLDEN_CROSS"
+        elif raw_signal_str in ("DEATH_CROSS", "DEAD_CROSS", "DEAD"):
+            if raw_indicator_str == "MACD":
+                raw_signal_str = "MACD_DEAD_CROSS"
+            elif raw_indicator_str == "RSI":
+                raw_signal_str = "RSI_DEAD_CROSS"
+            elif raw_indicator_str == "KDJ":
+                raw_signal_str = "KDJ_DEAD_CROSS"
+        elif raw_signal_str == "OVERSOLD":
+            if raw_indicator_str == "RSI":
+                raw_signal_str = "RSI_OVERSOLD"
+            elif raw_indicator_str == "KDJ":
+                raw_signal_str = "KDJ_OVERSOLD"
+        elif raw_signal_str == "OVERBOUGHT":
+            if raw_indicator_str == "RSI":
+                raw_signal_str = "RSI_OVERBOUGHT"
+            elif raw_indicator_str == "KDJ":
+                raw_signal_str = "KDJ_OVERBOUGHT"
+        elif raw_signal_str == "ABOVE_ZERO" and raw_indicator_str == "MACD":
+            raw_signal_str = "MACD_ABOVE_ZERO"
+        elif raw_signal_str == "BELOW_ZERO" and raw_indicator_str == "MACD":
+            raw_signal_str = "MACD_BELOW_ZERO"
+
+        indicator_type = IndicatorType(raw_indicator_str)
+        signal_type = SignalType(raw_signal_str)
     except Exception:
         return False
 
     try:
         if indicator_type == IndicatorType.RSI and signal_type == SignalType.RSI_OVERSOLD:
             value = df["rsi"].iloc[idx]
-            threshold = cond.get("params", {}).get("threshold", 30)
+            threshold = cond.get("params", {}).get("threshold") or cond.get("threshold", 30)
             return value < threshold
 
         if indicator_type == IndicatorType.RSI and signal_type == SignalType.RSI_OVERBOUGHT:
             value = df["rsi"].iloc[idx]
-            threshold = cond.get("params", {}).get("threshold", 70)
+            threshold = cond.get("params", {}).get("threshold") or cond.get("threshold", 70)
             return value > threshold
 
         if indicator_type == IndicatorType.MACD:
@@ -163,6 +198,7 @@ def evaluate_condition(cond: Condition, df: pd.DataFrame, idx: int) -> bool:
 
             if signal_type == SignalType.MACD_GOLDEN_CROSS:
                 if idx == 0:
+
                     return False
                 prev_diff = macd.iloc[idx - 1] - signal.iloc[idx - 1]
                 curr_diff = macd.iloc[idx] - signal.iloc[idx]
@@ -401,11 +437,55 @@ def evaluate_condition(cond: Condition, df: pd.DataFrame, idx: int) -> bool:
     return False
 
 
+import json
+
+
+def normalize_rule_set(rule_set: Any) -> dict:
+    if isinstance(rule_set, str):
+        try:
+            rule_set = json.loads(rule_set)
+        except Exception:
+            return {"buy_groups": [], "sell_groups": []}
+    if isinstance(rule_set, dict):
+        if "config_json" in rule_set and isinstance(rule_set["config_json"], (dict, str)):
+            if isinstance(rule_set["config_json"], str):
+                try:
+                    rule_set = json.loads(rule_set["config_json"])
+                except Exception:
+                    pass
+            else:
+                rule_set = rule_set["config_json"]
+        elif "strategy_config" in rule_set and isinstance(rule_set["strategy_config"], (dict, str)):
+            if isinstance(rule_set["strategy_config"], str):
+                try:
+                    rule_set = json.loads(rule_set["strategy_config"])
+                except Exception:
+                    pass
+            else:
+                rule_set = rule_set["strategy_config"]
+    return rule_set if isinstance(rule_set, dict) else {"buy_groups": [], "sell_groups": []}
+
+
 def evaluate_group(group: ConditionGroup, df: pd.DataFrame, idx: int, side: Side) -> bool:
-    logic = LogicOp(group["logic"])
+    raw_logic = group.get("logic") or group.get("group_logic") or "AND"
+    try:
+        logic = LogicOp(str(raw_logic).strip().upper())
+    except Exception:
+        logic = LogicOp.AND
+
     results: List[bool] = []
-    for cond in group["conditions"]:
-        if Side(cond["side"]) != side:
+    conditions = group.get("conditions") or []
+    for cond in conditions:
+        raw_side = cond.get("side") or cond.get("direction")
+        if raw_side:
+            try:
+                cond_side = Side(str(raw_side).strip().upper())
+            except Exception:
+                cond_side = side
+        else:
+            cond_side = side
+
+        if cond_side != side:
             continue
         results.append(evaluate_condition(cond, df, idx))
 
@@ -417,15 +497,18 @@ def evaluate_group(group: ConditionGroup, df: pd.DataFrame, idx: int, side: Side
     return any(results)
 
 
-def should_buy(rule_set: StrategyRuleSet, df: pd.DataFrame, idx: int) -> bool:
-    for group in rule_set.get("buy_groups", []):
+def should_buy(rule_set: Any, df: pd.DataFrame, idx: int) -> bool:
+    rule_set_norm = normalize_rule_set(rule_set)
+    for group in rule_set_norm.get("buy_groups", []):
         if evaluate_group(group, df, idx, Side.BUY):
             return True
     return False
 
 
-def should_sell(rule_set: StrategyRuleSet, df: pd.DataFrame, idx: int) -> bool:
-    for group in rule_set.get("sell_groups", []):
+def should_sell(rule_set: Any, df: pd.DataFrame, idx: int) -> bool:
+    rule_set_norm = normalize_rule_set(rule_set)
+    for group in rule_set_norm.get("sell_groups", []):
         if evaluate_group(group, df, idx, Side.SELL):
             return True
     return False
+

@@ -48,8 +48,9 @@ def create_strategy(payload: StrategyCreate, db: Session = Depends(get_db)) -> S
         monitor_interval_sec=payload.monitor_interval_sec,
         status="DRAFT",
         config_json=payload.config_json,
-        created_from_ai=False,
+        created_from_ai=payload.created_from_ai,
     )
+
     db.add(db_obj)
     db.commit()
     db.refresh(db_obj)

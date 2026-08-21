@@ -43,30 +43,32 @@ def create_backtest(payload: BacktestCreate, db: Session = Depends(get_db)) -> A
         if not strategy:
             raise HTTPException(status_code=404, detail="Strategy not found")
 
+        query = db.query(Kline).filter(
+            Kline.symbol_id == strategy.symbol_id,
+            Kline.timeframe == strategy.timeframe,
+        )
+        if payload.start_ts:
+            query = query.filter(Kline.ts >= payload.start_ts)
+        if payload.end_ts:
+            query = query.filter(Kline.ts <= payload.end_ts)
+
+        klines = query.order_by(Kline.ts.asc()).all()
+        if not klines:
+            raise HTTPException(status_code=400, detail="未找到对应的K线回测数据，请先下载该周期的K线数据")
+
+        actual_start_ts = payload.start_ts or klines[0].ts
+        actual_end_ts = payload.end_ts or klines[-1].ts
+
         bt = Backtest(
             strategy_id=strategy.id,
-            start_ts=payload.start_ts,
-            end_ts=payload.end_ts,
+            start_ts=actual_start_ts,
+            end_ts=actual_end_ts,
             initial_balance=payload.initial_balance,
-            status="PENDING",
+            status="RUNNING",
         )
         db.add(bt)
         db.commit()
         db.refresh(bt)
-
-        klines = (
-            db.query(Kline)
-            .filter(
-                Kline.symbol_id == strategy.symbol_id,
-                Kline.timeframe == strategy.timeframe,
-                Kline.ts >= payload.start_ts,
-                Kline.ts <= payload.end_ts,
-            )
-            .order_by(Kline.ts.asc())
-            .all()
-        )
-        if not klines:
-            raise HTTPException(status_code=400, detail="No kline data for backtest range")
 
         df = pd.DataFrame(
             [
@@ -82,11 +84,9 @@ def create_backtest(payload: BacktestCreate, db: Session = Depends(get_db)) -> A
             ]
         )
 
-        bt.status = "RUNNING"
-        db.commit()
-
         rule_set = json.loads(strategy.config_json)
         result = run_backtest(df, rule_set, initial_balance=payload.initial_balance)
+
 
         bt.status = "FINISHED"
         bt.result_json = json.dumps({

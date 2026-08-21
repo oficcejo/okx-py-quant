@@ -3,7 +3,7 @@
 """
 from app.db.session import SessionLocal
 from app.models import Symbol, ExchangeAccount, User
-from passlib.hash import bcrypt
+import hashlib
 import requests
 import json
 
@@ -17,9 +17,11 @@ def quick_start():
     # 1. 创建用户
     user = db.query(User).first()
     if not user:
-        user = User(username="admin", password_hash=bcrypt.hash("admin123"))
+        pwd_hash = hashlib.sha256(b"admin123").hexdigest()
+        user = User(username="admin", password_hash=pwd_hash)
         db.add(user)
         db.commit()
+
     print(f"✅ 用户 ID: {user.id}")
     
     # 2. 创建BTC品种
