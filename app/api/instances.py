@@ -63,7 +63,7 @@ def create_instance(
 
 
 
-@router.post("/{instance_id}/start", response_model=StrategyInstanceSchema)
+@router.post("/{instance_id:int}/start", response_model=StrategyInstanceSchema)
 def start_instance(instance_id: int, db: Session = Depends(get_db)) -> StrategyInstanceSchema:
     inst = db.query(StrategyInstance).filter(StrategyInstance.id == instance_id).first()
     if not inst:
@@ -79,10 +79,10 @@ def start_instance(instance_id: int, db: Session = Depends(get_db)) -> StrategyI
 
     start_strategy_instance(inst.id, strategy.monitor_interval_sec)
 
-    return inst
+    return _enrich_instance(inst, db)
 
 
-@router.post("/{instance_id}/stop", response_model=StrategyInstanceSchema)
+@router.post("/{instance_id:int}/stop", response_model=StrategyInstanceSchema)
 def stop_instance(instance_id: int, db: Session = Depends(get_db)) -> StrategyInstanceSchema:
     inst = db.query(StrategyInstance).filter(StrategyInstance.id == instance_id).first()
     if not inst:
@@ -94,10 +94,10 @@ def stop_instance(instance_id: int, db: Session = Depends(get_db)) -> StrategyIn
 
     stop_strategy_instance(inst.id)
 
-    return inst
+    return _enrich_instance(inst, db)
 
 
-@router.delete("/{instance_id}")
+@router.delete("/{instance_id:int}")
 def delete_instance(instance_id: int, db: Session = Depends(get_db)) -> dict:
     """删除实盘实例（只能删除已停止的实例）"""
     inst = db.query(StrategyInstance).filter(StrategyInstance.id == instance_id).first()
@@ -117,7 +117,7 @@ def delete_instance(instance_id: int, db: Session = Depends(get_db)) -> dict:
     return {"ok": True, "message": "实例已删除"}
 
 
-@router.get("/{instance_id}/trades", response_model=List[LiveTradeSchema])
+@router.get("/{instance_id:int}/trades", response_model=List[LiveTradeSchema])
 def get_instance_trades(instance_id: int, db: Session = Depends(get_db)) -> List[LiveTradeSchema]:
     """获取实例的所有交易记录"""
     inst = db.query(StrategyInstance).filter(StrategyInstance.id == instance_id).first()
@@ -133,8 +133,9 @@ def get_instance_trades(instance_id: int, db: Session = Depends(get_db)) -> List
     return trades
 
 
-@router.get("/{instance_id}/summary")
+@router.get("/{instance_id:int}/summary")
 def get_instance_summary(instance_id: int, db: Session = Depends(get_db)) -> dict:
+
     """获取实例的交易统计摘要"""
     inst = db.query(StrategyInstance).filter(StrategyInstance.id == instance_id).first()
     if not inst:

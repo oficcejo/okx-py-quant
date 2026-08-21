@@ -104,8 +104,11 @@ const DashboardPage: React.FC = () => {
     // 建立 WebSocket 实时行情连接
     let ws: WebSocket | null = null
     try {
-      const wsUrl = `ws://127.0.0.1:8000/ws/market`
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const defaultHost = import.meta.env.DEV ? '127.0.0.1:8000' : window.location.host
+      const wsUrl = `${protocol}//${defaultHost}/ws/market`
       ws = new WebSocket(wsUrl)
+
 
       ws.onopen = () => {
         setWsConnected(true)

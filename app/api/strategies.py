@@ -112,7 +112,7 @@ def create_strategy(payload: StrategyCreate, db: Session = Depends(get_db)) -> S
     return db_obj
 
 
-@router.get("/{strategy_id}", response_model=StrategySchema)
+@router.get("/{strategy_id:int}", response_model=StrategySchema)
 def get_strategy(strategy_id: int, db: Session = Depends(get_db)) -> StrategySchema:
     db_obj = db.query(Strategy).filter(Strategy.id == strategy_id).first()
     if not db_obj:
@@ -120,7 +120,7 @@ def get_strategy(strategy_id: int, db: Session = Depends(get_db)) -> StrategySch
     return db_obj
 
 
-@router.put("/{strategy_id}", response_model=StrategySchema)
+@router.put("/{strategy_id:int}", response_model=StrategySchema)
 def update_strategy(strategy_id: int, payload: StrategyCreate, db: Session = Depends(get_db)) -> StrategySchema:
     db_obj = db.query(Strategy).filter(Strategy.id == strategy_id).first()
     if not db_obj:
@@ -143,8 +143,8 @@ def update_strategy(strategy_id: int, payload: StrategyCreate, db: Session = Dep
     return db_obj
 
 
-@router.delete("/{strategy_id}")
-def delete_strategy(strategy_id: int, db: Session = Depends(get_db)) -> dict:
+@router.delete("/{strategy_id:int}")
+def delete_strategy(strategy_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
     db_obj = db.query(Strategy).filter(Strategy.id == strategy_id).first()
     if not db_obj:
         raise HTTPException(status_code=404, detail="Strategy not found")

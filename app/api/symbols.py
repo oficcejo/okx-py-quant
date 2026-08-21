@@ -104,12 +104,12 @@ def create_symbol(payload: SymbolCreate, db: Session = Depends(get_db)) -> Any:
     return new_symbol
 
 
-@router.put("/{symbol_id}", response_model=SymbolSchema)
+@router.put("/{symbol_id:int}", response_model=SymbolSchema)
 def update_symbol(symbol_id: int, payload: SymbolUpdate, db: Session = Depends(get_db)) -> Any:
     """编辑或启停特定交易品种"""
     symbol = db.query(Symbol).filter(Symbol.id == symbol_id).first()
     if not symbol:
-        raise HTTPException(status_code=404, detail="交易品种不存在")
+        raise HTTPException(status_code=404, detail="交易品种未找到")
 
     if payload.display_name is not None:
         symbol.display_name = payload.display_name.strip()
@@ -127,7 +127,7 @@ def update_symbol(symbol_id: int, payload: SymbolUpdate, db: Session = Depends(g
     return symbol
 
 
-@router.delete("/{symbol_id}")
+@router.delete("/{symbol_id:int}")
 def delete_symbol(symbol_id: int, db: Session = Depends(get_db)) -> dict:
     """删除自定义交易品种（若已有K线数据或关联策略则安全禁用）"""
     symbol = db.query(Symbol).filter(Symbol.id == symbol_id).first()

@@ -124,34 +124,48 @@ npm run dev
 
 ---
 
-### 方式二：Docker 一键容器化部署
+### 方式二：Docker 单容器一键部署（前后端合并）
+
+系统采用前后端**多阶段单容器镜像架构**，单一容器同时托管 React SPA 前端、FastAPI 后端、WebSocket 实时行情与 SQLite 数据持久化：
 
 ```bash
-# 一键构建并后台启动全部服务
+# 1. 复制配置文件（首次部署）
+cp .env.example .env
+
+# 2. 一键构建并后台启动容器
 docker-compose up -d --build
 
-# 查看运行日志
+# 3. 查看实时运行日志
 docker-compose logs -f
 ```
+
+- **访问全栈系统**：浏览器打开 `http://<服务器IP>:8000`
+- **数据持久化说明**：本地 `./data` 目录自动挂载映射至容器内 `/app/data`，数据库及历史行情文件升级重建不丢失。
 
 ---
 
 ## ⚙️ 环境变量配置 (`.env`)
 
-在项目根目录下创建 `.env` 文件：
+在项目根目录下配置 `.env` 文件（参考 `.env.example`）：
 
 ```ini
-# OKX API 交易密钥（实盘必须）
+# 1. 数据库配置
+# Docker 单容器部署推荐（映射挂载卷）：
+DATABASE_URL=sqlite:////app/data/okx_quant.db
+
+# 2. OKX API 交易密钥（实盘交易与账户资产查询必填）
 OKX_API_KEY=your_api_key_here
 OKX_API_SECRET=your_api_secret_here
 OKX_PASSPHRASE=your_passphrase_here
+OKX_BASE_URL=https://www.okx.com
 OKX_IS_SIMULATED=false
 
-# AI 策略生成与调优大模型配置 (支持 DeepSeek / OpenAI 等)
+# 3. AI 策略生成与调优大模型配置 (支持 DeepSeek / OpenAI / OneAPI 等)
 AI_API_KEY=your_ai_api_key_here
 AI_API_BASE_URL=https://api.deepseek.com/v1
 AI_MODEL_NAME=deepseek-chat
 ```
+
 
 ---
 
