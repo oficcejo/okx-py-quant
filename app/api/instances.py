@@ -13,10 +13,24 @@ from app.workers.live_trading import start_strategy_instance, stop_strategy_inst
 router = APIRouter(prefix="/instances", tags=["instances"])
 
 
+def _enrich_instance(inst: StrategyInstance, db: Session) -> StrategyInstanceSchema:
+    strategy = db.query(Strategy).filter(Strategy.id == inst.strategy_id).first()
+    symbol = db.query(Symbol).filter(Symbol.id == inst.symbol_id).first()
+    
+    schema = StrategyInstanceSchema.from_orm(inst)
+    if strategy:
+        schema.strategy_name = strategy.name
+    if symbol:
+        schema.symbol_inst_id = symbol.inst_id
+        schema.symbol_display_name = symbol.display_name or symbol.inst_id
+        schema.symbol_category = symbol.category or "CRYPTO"
+    return schema
+
+
 @router.get("/", response_model=List[StrategyInstanceSchema])
 def list_instances(db: Session = Depends(get_db)) -> List[StrategyInstanceSchema]:
-    items = db.query(StrategyInstance).all()
-    return items
+    items = db.query(StrategyInstance).order_by(StrategyInstance.id.desc()).all()
+    return [_enrich_instance(i, db) for i in items]
 
 
 @router.post("/", response_model=StrategyInstanceSchema)
@@ -31,6 +45,9 @@ def create_instance(
     strategy = db.query(Strategy).filter(Strategy.id == strategy_id).first()
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not found")
+    symbol = db.query(Symbol).filter(Symbol.id == symbol_id).first()
+    if not symbol:
+        raise HTTPException(status_code=404, detail="Symbol not found")
 
     inst = StrategyInstance(
         strategy_id=strategy_id,
@@ -42,7 +59,8 @@ def create_instance(
     db.add(inst)
     db.commit()
     db.refresh(inst)
-    return inst
+    return _enrich_instance(inst, db)
+
 
 
 @router.post("/{instance_id}/start", response_model=StrategyInstanceSchema)

@@ -13,12 +13,20 @@ import {
   Select,
   Space,
   Tag,
+  Tabs,
 } from 'antd'
-import { PlusOutlined, DeleteOutlined, SaveOutlined } from '@ant-design/icons'
+import {
+  PlusOutlined,
+  DeleteOutlined,
+  SaveOutlined,
+  ArrowUpOutlined,
+  ArrowDownOutlined,
+  CheckCircleOutlined,
+} from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 
 import api from '../api'
-import { BUY_INDICATORS, SELL_INDICATORS, IndicatorConfig, IndicatorSignal } from '../config/indicators'
+import { BUY_INDICATORS, SELL_INDICATORS, IndicatorConfig } from '../config/indicators'
 
 interface Symbol {
   id: number
@@ -26,13 +34,17 @@ interface Symbol {
   base_ccy: string
   quote_ccy: string
   inst_type: string
+  category?: string
   display_name: string
+  is_custom?: boolean
 }
 
+
 interface Condition {
-  side: 'BUY' | 'SELL'
+  side: 'BUY' | 'SELL' | 'OPEN_LONG' | 'CLOSE_LONG' | 'OPEN_SHORT' | 'CLOSE_SHORT'
   indicator_type: string
   signal_type: string
+  timeframe?: string
   params: Record<string, number>
 }
 
@@ -45,17 +57,18 @@ const StrategyBuilderPage: React.FC = () => {
   const navigate = useNavigate()
   const [form] = Form.useForm()
   const [symbols, setSymbols] = useState<Symbol[]>([])
-  
-  const [buyGroups, setBuyGroups] = useState<ConditionGroup[]>([
-    { logic: 'AND', conditions: [] },
-  ])
-  const [sellGroups, setSellGroups] = useState<ConditionGroup[]>([
-    { logic: 'AND', conditions: [] },
-  ])
+
+  const [openLongGroups, setOpenLongGroups] = useState<ConditionGroup[]>([{ logic: 'AND', conditions: [] }])
+  const [closeLongGroups, setCloseLongGroups] = useState<ConditionGroup[]>([{ logic: 'AND', conditions: [] }])
+  const [openShortGroups, setOpenShortGroups] = useState<ConditionGroup[]>([{ logic: 'AND', conditions: [] }])
+  const [closeShortGroups, setCloseShortGroups] = useState<ConditionGroup[]>([{ logic: 'AND', conditions: [] }])
+
+  const [saving, setSaving] = useState(false)
 
   // 加载Symbol列表
   useEffect(() => {
-    api.get('/strategies/symbols/list')
+    api
+      .get('/strategies/symbols/list')
       .then(res => {
         setSymbols(res.data)
       })
@@ -64,58 +77,52 @@ const StrategyBuilderPage: React.FC = () => {
       })
   }, [])
 
-  // 添加买入条件
-  const addBuyCondition = (groupIndex: number) => {
-    const newGroups = [...buyGroups]
+  // 通用添加条件
+  const addCondition = (
+    groups: ConditionGroup[],
+    setGroups: React.Dispatch<React.SetStateAction<ConditionGroup[]>>,
+    groupIndex: number,
+    side: any,
+    isBuy: boolean
+  ) => {
+    const newGroups = [...groups]
     newGroups[groupIndex].conditions.push({
-      side: 'BUY',
+      side,
       indicator_type: 'MACD',
-      signal_type: 'MACD_GOLDEN_CROSS',
+      signal_type: isBuy ? 'MACD_GOLDEN_CROSS' : 'MACD_DEAD_CROSS',
       params: {},
     })
-    setBuyGroups(newGroups)
+    setGroups(newGroups)
   }
 
-  // 添加卖出条件
-  const addSellCondition = (groupIndex: number) => {
-    const newGroups = [...sellGroups]
-    newGroups[groupIndex].conditions.push({
-      side: 'SELL',
-      indicator_type: 'MACD',
-      signal_type: 'MACD_DEAD_CROSS',
-      params: {},
-    })
-    setSellGroups(newGroups)
-  }
-
-  // 删除买入条件
-  const removeBuyCondition = (groupIndex: number, condIndex: number) => {
-    const newGroups = [...buyGroups]
+  // 通用删除条件
+  const removeCondition = (
+    groups: ConditionGroup[],
+    setGroups: React.Dispatch<React.SetStateAction<ConditionGroup[]>>,
+    groupIndex: number,
+    condIndex: number
+  ) => {
+    const newGroups = [...groups]
     newGroups[groupIndex].conditions.splice(condIndex, 1)
-    setBuyGroups(newGroups)
+    setGroups(newGroups)
   }
 
-  // 删除卖出条件
-  const removeSellCondition = (groupIndex: number, condIndex: number) => {
-    const newGroups = [...sellGroups]
-    newGroups[groupIndex].conditions.splice(condIndex, 1)
-    setSellGroups(newGroups)
-  }
-
-  // 更新买入条件
-  const updateBuyCondition = (
+  // 通用更新条件
+  const updateCondition = (
+    groups: ConditionGroup[],
+    setGroups: React.Dispatch<React.SetStateAction<ConditionGroup[]>>,
     groupIndex: number,
     condIndex: number,
     field: string,
-    value: any
+    value: any,
+    indicators: IndicatorConfig[]
   ) => {
-    const newGroups = [...buyGroups]
+    const newGroups = [...groups]
     if (field === 'indicator_type') {
-      // 切换指标类型时，重置信号类型
-      const indicator = BUY_INDICATORS.find(ind => ind.type === value)
+      const indicator = indicators.find(ind => ind.type === value)
       newGroups[groupIndex].conditions[condIndex].indicator_type = value
       newGroups[groupIndex].conditions[condIndex].signal_type =
-        indicator?.buySignals?.[0]?.value || ''
+        indicator?.buySignals?.[0]?.value || indicator?.sellSignals?.[0]?.value || ''
       newGroups[groupIndex].conditions[condIndex].params = {}
     } else if (field === 'signal_type') {
       newGroups[groupIndex].conditions[condIndex].signal_type = value
@@ -123,52 +130,23 @@ const StrategyBuilderPage: React.FC = () => {
     } else {
       ;(newGroups[groupIndex].conditions[condIndex] as any)[field] = value
     }
-    setBuyGroups(newGroups)
-  }
-
-  // 更新卖出条件
-  const updateSellCondition = (
-    groupIndex: number,
-    condIndex: number,
-    field: string,
-    value: any
-  ) => {
-    const newGroups = [...sellGroups]
-    if (field === 'indicator_type') {
-      const indicator = SELL_INDICATORS.find(ind => ind.type === value)
-      newGroups[groupIndex].conditions[condIndex].indicator_type = value
-      newGroups[groupIndex].conditions[condIndex].signal_type =
-        indicator?.sellSignals?.[0]?.value || ''
-      newGroups[groupIndex].conditions[condIndex].params = {}
-    } else if (field === 'signal_type') {
-      newGroups[groupIndex].conditions[condIndex].signal_type = value
-      newGroups[groupIndex].conditions[condIndex].params = {}
-    } else {
-      ;(newGroups[groupIndex].conditions[condIndex] as any)[field] = value
-    }
-    setSellGroups(newGroups)
+    setGroups(newGroups)
   }
 
   // 更新参数
   const updateConditionParam = (
-    type: 'buy' | 'sell',
+    groups: ConditionGroup[],
+    setGroups: React.Dispatch<React.SetStateAction<ConditionGroup[]>>,
     groupIndex: number,
     condIndex: number,
     paramName: string,
     value: number
   ) => {
-    if (type === 'buy') {
-      const newGroups = [...buyGroups]
-      newGroups[groupIndex].conditions[condIndex].params[paramName] = value
-      setBuyGroups(newGroups)
-    } else {
-      const newGroups = [...sellGroups]
-      newGroups[groupIndex].conditions[condIndex].params[paramName] = value
-      setSellGroups(newGroups)
-    }
+    const newGroups = [...groups]
+    newGroups[groupIndex].conditions[condIndex].params[paramName] = value
+    setGroups(newGroups)
   }
 
-  // 获取当前信号的参数定义
   const getSignalParams = (indicators: IndicatorConfig[], indicatorType: string, signalType: string) => {
     const indicator = indicators.find(ind => ind.type === indicatorType)
     const signals = indicator?.buySignals || indicator?.sellSignals || []
@@ -176,178 +154,202 @@ const StrategyBuilderPage: React.FC = () => {
     return signal?.params || []
   }
 
-  // 生成策略配置JSON
   const generateConfig = () => {
+    const ol = openLongGroups.filter(g => g.conditions.length > 0)
+    const cl = closeLongGroups.filter(g => g.conditions.length > 0)
+    const os = openShortGroups.filter(g => g.conditions.length > 0)
+    const cs = closeShortGroups.filter(g => g.conditions.length > 0)
+
     return {
-      buy_groups: buyGroups.filter(g => g.conditions.length > 0),
-      sell_groups: sellGroups.filter(g => g.conditions.length > 0),
+      open_long_groups: ol,
+      close_long_groups: cl,
+      open_short_groups: os,
+      close_short_groups: cs,
+      // 兼容老版本格式
+      buy_groups: ol,
+      sell_groups: cl,
     }
   }
 
-  // 保存策略
   const handleSave = () => {
-    form
-      .validateFields()
-      .then(values => {
-        const config = generateConfig()
-        
-        if (config.buy_groups.length === 0 && config.sell_groups.length === 0) {
-          message.warning('请至少添加一个买入或卖出条件')
-          return
-        }
+    form.validateFields().then(values => {
+      const config = generateConfig()
+      if (
+        config.open_long_groups.length === 0 &&
+        config.close_long_groups.length === 0 &&
+        config.open_short_groups.length === 0 &&
+        config.close_short_groups.length === 0
+      ) {
+        message.warning('请至少添加一个开多/平多/开空/平空条件')
+        return
+      }
 
-        const payload = {
-          name: values.name,
-          description: values.description,
-          symbol_id: values.symbol_id,
-          timeframe: values.timeframe,
-          leverage: values.leverage || 1,
-          monitor_interval_sec: values.monitor_interval_sec || 60,
-          config_json: JSON.stringify(config, null, 2),
-        }
+      setSaving(true)
+      const payload = {
+        name: values.name,
+        description: values.description,
+        symbol_id: values.symbol_id,
+        timeframe: values.timeframe,
+        leverage: values.leverage || 1.0,
+        monitor_interval_sec: values.monitor_interval_sec || 60,
+        stop_loss_pct: values.stop_loss_pct ?? null,
+        take_profit_pct: values.take_profit_pct ?? null,
+        trailing_stop_pct: values.trailing_stop_pct ?? null,
+        config_json: JSON.stringify(config, null, 2),
+      }
 
-        return api.post('/strategies/', payload)
-      })
-      .then(() => {
-        message.success('策略创建成功！')
-        navigate('/strategies')
-      })
-      .catch(err => {
-        if (err.response) {
-          message.error('创建失败: ' + (err.response.data?.detail || err.message))
-        }
-      })
+      api
+        .post('/strategies/', payload)
+        .then(() => {
+          message.success('策略创建并保存成功！')
+          navigate('/strategies')
+        })
+        .catch(err => {
+          message.error('保存失败: ' + (err.response?.data?.detail || err.message))
+        })
+        .finally(() => setSaving(false))
+    })
   }
 
-  // 渲染条件组
+  // 渲染单组条件
   const renderConditionGroup = (
-    type: 'buy' | 'sell',
+    title: string,
     groups: ConditionGroup[],
+    setGroups: React.Dispatch<React.SetStateAction<ConditionGroup[]>>,
     groupIndex: number,
-    indicators: IndicatorConfig[]
+    indicators: IndicatorConfig[],
+    side: any,
+    isBuy: boolean
   ) => {
     const group = groups[groupIndex]
-    const isBuy = type === 'buy'
-
     return (
       <Card
+        key={groupIndex}
         size="small"
+        style={{ marginBottom: 16, background: '#fafafa' }}
         title={
           <Space>
-            <span>{isBuy ? '买入' : '卖出'}条件组 {groupIndex + 1}</span>
+            <span>{title} 条件组 #{groupIndex + 1}</span>
             <Select
               size="small"
               value={group.logic}
-              style={{ width: 100 }}
-              onChange={value => {
-                const newGroups = isBuy ? [...buyGroups] : [...sellGroups]
-                newGroups[groupIndex].logic = value
-                isBuy ? setBuyGroups(newGroups) : setSellGroups(newGroups)
+              onChange={val => {
+                const newGroups = [...groups]
+                newGroups[groupIndex].logic = val
+                setGroups(newGroups)
               }}
               options={[
-                { label: 'AND (且)', value: 'AND' },
-                { label: 'OR (或)', value: 'OR' },
+                { label: 'AND (全部满足)', value: 'AND' },
+                { label: 'OR (任一满足)', value: 'OR' },
               ]}
+              style={{ width: 150 }}
             />
           </Space>
         }
         extra={
-          <Button
-            type="link"
-            size="small"
-            icon={<PlusOutlined />}
-            onClick={() => (isBuy ? addBuyCondition(groupIndex) : addSellCondition(groupIndex))}
-          >
-            添加条件
-          </Button>
+          <Space>
+            <Button
+              type="dashed"
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={() => addCondition(groups, setGroups, groupIndex, side, isBuy)}
+            >
+              添加条件
+            </Button>
+          </Space>
         }
-        style={{ marginBottom: 16 }}
       >
         {group.conditions.length === 0 ? (
-          <div style={{ textAlign: 'center', color: '#999', padding: 20 }}>
-            暂无条件，点击"添加条件"开始配置
+          <div style={{ padding: 12, textAlign: 'center', color: '#999' }}>
+            暂无条件，点击右上角「添加条件」
           </div>
         ) : (
           group.conditions.map((cond, condIndex) => {
             const indicator = indicators.find(ind => ind.type === cond.indicator_type)
-            const signals = isBuy ? indicator?.buySignals : indicator?.sellSignals
-            const signal = signals?.find(sig => sig.value === cond.signal_type)
-            const params = signal?.params || []
+            const signals = isBuy ? indicator?.buySignals || [] : indicator?.sellSignals || []
+            const paramDefs = getSignalParams(indicators, cond.indicator_type, cond.signal_type)
 
             return (
-              <div key={condIndex} style={{ marginBottom: 12, padding: 12, background: '#fafafa', borderRadius: 4 }}>
-                <Row gutter={8} align="middle">
-                  <Col span={5}>
+              <div
+                key={condIndex}
+                style={{
+                  padding: '10px 12px',
+                  background: '#fff',
+                  border: '1px solid #f0f0f0',
+                  borderRadius: 6,
+                  marginBottom: 10,
+                }}
+              >
+                <Row gutter={12} align="middle">
+                  <Col span={6}>
                     <Select
-                      placeholder="选择指标"
-                      value={cond.indicator_type}
-                      onChange={value =>
-                        isBuy
-                          ? updateBuyCondition(groupIndex, condIndex, 'indicator_type', value)
-                          : updateSellCondition(groupIndex, condIndex, 'indicator_type', value)
-                      }
                       style={{ width: '100%' }}
-                    >
-                      {indicators.map(ind => (
-                        <Select.Option key={ind.type} value={ind.type}>
-                          {ind.label}
-                        </Select.Option>
-                      ))}
-                    </Select>
+                      value={cond.indicator_type}
+                      onChange={val =>
+                        updateCondition(groups, setGroups, groupIndex, condIndex, 'indicator_type', val, indicators)
+                      }
+                      options={indicators.map(ind => ({
+                        label: `${ind.name} (${ind.type})`,
+                        value: ind.type,
+                      }))}
+                    />
                   </Col>
+
                   <Col span={7}>
                     <Select
-                      placeholder="选择信号"
-                      value={cond.signal_type}
-                      onChange={value =>
-                        isBuy
-                          ? updateBuyCondition(groupIndex, condIndex, 'signal_type', value)
-                          : updateSellCondition(groupIndex, condIndex, 'signal_type', value)
-                      }
                       style={{ width: '100%' }}
-                    >
-                      {signals?.map(sig => (
-                        <Select.Option key={sig.value} value={sig.value}>
-                          {sig.label}
-                        </Select.Option>
-                      ))}
-                    </Select>
+                      value={cond.signal_type}
+                      onChange={val =>
+                        updateCondition(groups, setGroups, groupIndex, condIndex, 'signal_type', val, indicators)
+                      }
+                      options={signals.map(sig => ({
+                        label: sig.label,
+                        value: sig.value,
+                      }))}
+                    />
                   </Col>
-                  <Col span={10}>
-                    <Space>
-                      {params.map(param => (
-                        <InputNumber
-                          key={param.name}
-                          placeholder={param.label}
-                          value={cond.params[param.name] || param.default}
-                          min={param.min}
-                          max={param.max}
-                          onChange={value =>
-                            updateConditionParam(
-                              type,
-                              groupIndex,
-                              condIndex,
-                              param.name,
-                              value || param.default
-                            )
-                          }
-                          style={{ width: 100 }}
-                          addonBefore={param.label}
-                        />
-                      ))}
-                    </Space>
+
+                  <Col span={5}>
+                    <Select
+                      style={{ width: '100%' }}
+                      placeholder="周期: 默认主周期"
+                      allowClear
+                      value={cond.timeframe}
+                      onChange={val =>
+                        updateCondition(groups, setGroups, groupIndex, condIndex, 'timeframe', val, indicators)
+                      }
+                      options={[
+                        { label: '当前主周期', value: undefined },
+                        { label: '跨周期: 15分钟', value: '15m' },
+                        { label: '跨周期: 1小时', value: '1H' },
+                        { label: '跨周期: 4小时', value: '4H' },
+                        { label: '跨周期: 1天', value: '1D' },
+                      ]}
+                    />
                   </Col>
+
+                  <Col span={4}>
+                    {paramDefs.map(pDef => (
+                      <InputNumber
+                        key={pDef.name}
+                        size="small"
+                        placeholder={pDef.label}
+                        value={cond.params[pDef.name] ?? pDef.defaultValue}
+                        onChange={v =>
+                          updateConditionParam(groups, setGroups, groupIndex, condIndex, pDef.name, v || 0)
+                        }
+                        style={{ width: '100%' }}
+                      />
+                    ))}
+                  </Col>
+
                   <Col span={2}>
                     <Button
                       type="text"
                       danger
                       size="small"
                       icon={<DeleteOutlined />}
-                      onClick={() =>
-                        isBuy
-                          ? removeBuyCondition(groupIndex, condIndex)
-                          : removeSellCondition(groupIndex, condIndex)
-                      }
+                      onClick={() => removeCondition(groups, setGroups, groupIndex, condIndex)}
                     />
                   </Col>
                 </Row>
@@ -362,11 +364,17 @@ const StrategyBuilderPage: React.FC = () => {
   return (
     <div style={{ padding: 24 }}>
       <Card
-        title="策略构建器"
+        title={
+          <Space>
+            <span>可视化量化策略构建器</span>
+            <Tag color="green">多空双向支持</Tag>
+            <Tag color="purple">跨周期共振</Tag>
+          </Space>
+        }
         extra={
           <Space>
             <Button onClick={() => navigate('/strategies')}>取消</Button>
-            <Button type="primary" icon={<SaveOutlined />} onClick={handleSave}>
+            <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving}>
               保存策略
             </Button>
           </Space>
@@ -376,31 +384,89 @@ const StrategyBuilderPage: React.FC = () => {
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item name="name" label="策略名称" rules={[{ required: true, message: '请输入策略名称' }]}>
-                <Input placeholder="例如：MACD金叉+RSI超卖策略" />
+                <Input placeholder="例如：BTC 15m MACD金叉 + 4H趋势共振策略" />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="symbol_id" label="交易品种" rules={[{ required: true, message: '请选择交易品种' }]}>
+              <Form.Item
+                name="symbol_id"
+                label="交易品种 (支持 TradFi 大宗 / 美股 / 加密货币 / 自定义)"
+                rules={[{ required: true, message: '请选择交易品种' }]}
+              >
                 <Select
                   showSearch
-                  placeholder="选择交易品种"
+                  placeholder="选择交易标的，如 XAU, NVDA, BTC"
                   optionFilterProp="children"
-                  filterOption={(input, option) =>
-                    (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                  }
-                  options={symbols.map(s => ({
-                    value: s.id,
-                    label: `${s.inst_id} - ${s.display_name}`,
-                  }))}
-                />
+                >
+                  {symbols.filter(s => s.category === 'COMMODITY').length > 0 && (
+                    <Select.OptGroup label="🪙 贵金属与大宗商品 (Commodities)">
+                      {symbols
+                        .filter(s => s.category === 'COMMODITY')
+                        .map(s => (
+                          <Select.Option key={s.id} value={s.id}>
+                            {s.display_name || s.inst_id} ({s.inst_id})
+                          </Select.Option>
+                        ))}
+                    </Select.OptGroup>
+                  )}
+
+                  {symbols.filter(s => s.category === 'STOCK').length > 0 && (
+                    <Select.OptGroup label="📈 美股热门股票 (US Stocks)">
+                      {symbols
+                        .filter(s => s.category === 'STOCK')
+                        .map(s => (
+                          <Select.Option key={s.id} value={s.id}>
+                            {s.display_name || s.inst_id} ({s.inst_id})
+                          </Select.Option>
+                        ))}
+                    </Select.OptGroup>
+                  )}
+
+                  {symbols.filter(s => s.category === 'INDEX').length > 0 && (
+                    <Select.OptGroup label="📊 指数与 ETF (Indices)">
+                      {symbols
+                        .filter(s => s.category === 'INDEX')
+                        .map(s => (
+                          <Select.Option key={s.id} value={s.id}>
+                            {s.display_name || s.inst_id} ({s.inst_id})
+                          </Select.Option>
+                        ))}
+                    </Select.OptGroup>
+                  )}
+
+                  {symbols.filter(s => s.category === 'CRYPTO' || !s.category).length > 0 && (
+                    <Select.OptGroup label="🚀 主流加密货币 (Crypto)">
+                      {symbols
+                        .filter(s => s.category === 'CRYPTO' || !s.category)
+                        .map(s => (
+                          <Select.Option key={s.id} value={s.id}>
+                            {s.display_name || s.inst_id} ({s.inst_id})
+                          </Select.Option>
+                        ))}
+                    </Select.OptGroup>
+                  )}
+
+                  {symbols.filter(s => s.is_custom).length > 0 && (
+                    <Select.OptGroup label="⭐ 自定义品种 (Custom)">
+                      {symbols
+                        .filter(s => s.is_custom)
+                        .map(s => (
+                          <Select.Option key={s.id} value={s.id}>
+                            {s.display_name || s.inst_id} ({s.inst_id})
+                          </Select.Option>
+                        ))}
+                    </Select.OptGroup>
+                  )}
+                </Select>
               </Form.Item>
+
             </Col>
           </Row>
 
           <Row gutter={16}>
             <Col span={6}>
-              <Form.Item name="timeframe" label="K线周期" rules={[{ required: true, message: '请选择周期' }]}>
-                <Select placeholder="选择周期">
+              <Form.Item name="timeframe" label="K线主周期" rules={[{ required: true, message: '请选择周期' }]}>
+                <Select placeholder="选择主周期">
                   <Select.Option value="1m">1分钟</Select.Option>
                   <Select.Option value="5m">5分钟</Select.Option>
                   <Select.Option value="15m">15分钟</Select.Option>
@@ -417,27 +483,116 @@ const StrategyBuilderPage: React.FC = () => {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="monitor_interval_sec" label="监控周期(秒)" initialValue={60}>
+              <Form.Item name="monitor_interval_sec" label="监控轮询周期(秒)" initialValue={60}>
                 <InputNumber min={1} placeholder="60" style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>
 
+          {/* 策略风控参数 */}
+          <Card type="inner" title="🛡️ 策略风控参数 (可选)" style={{ marginBottom: 16 }}>
+            <Row gutter={16}>
+              <Col span={8}>
+                <Form.Item name="stop_loss_pct" label="止损比例 (%)">
+                  <InputNumber min={0.1} max={100} step={0.5} placeholder="如: 2.0 代表2%止损" style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="take_profit_pct" label="止盈比例 (%)">
+                  <InputNumber min={0.1} max={1000} step={0.5} placeholder="如: 5.0 代表5%止盈" style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="trailing_stop_pct" label="移动追踪止损 (%)">
+                  <InputNumber min={0.1} max={100} step={0.5} placeholder="如: 1.5 从极值回撤1.5%" style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Card>
+
           <Form.Item name="description" label="策略描述">
-            <Input.TextArea rows={2} placeholder="描述策略的逻辑和用途..." />
+            <Input.TextArea rows={2} placeholder="描述策略的逻辑、多空方向和适用场景..." />
           </Form.Item>
         </Form>
 
-        <Divider orientation="left">买入条件配置</Divider>
-        {buyGroups.map((_, index) => renderConditionGroup('buy', buyGroups, index, BUY_INDICATORS))}
-
-        <Divider orientation="left">卖出条件配置</Divider>
-        {sellGroups.map((_, index) => renderConditionGroup('sell', sellGroups, index, SELL_INDICATORS))}
+        <Divider orientation="left">四向交易规则配置 (开多 / 平多 / 开空 / 平空)</Divider>
+        <Tabs
+          items={[
+            {
+              key: 'open_long',
+              label: (
+                <span>
+                  🟢 开多买入规则 ({openLongGroups.reduce((acc, g) => acc + g.conditions.length, 0)} 条件)
+                </span>
+              ),
+              children: (
+                <div>
+                  {openLongGroups.map((_, index) =>
+                    renderConditionGroup('开多', openLongGroups, setOpenLongGroups, index, BUY_INDICATORS, 'OPEN_LONG', true)
+                  )}
+                </div>
+              ),
+            },
+            {
+              key: 'close_long',
+              label: (
+                <span>
+                  🔴 平多卖出规则 ({closeLongGroups.reduce((acc, g) => acc + g.conditions.length, 0)} 条件)
+                </span>
+              ),
+              children: (
+                <div>
+                  {closeLongGroups.map((_, index) =>
+                    renderConditionGroup('平多', closeLongGroups, setCloseLongGroups, index, SELL_INDICATORS, 'CLOSE_LONG', false)
+                  )}
+                </div>
+              ),
+            },
+            {
+              key: 'open_short',
+              label: (
+                <span>
+                  📉 开空卖出规则 ({openShortGroups.reduce((acc, g) => acc + g.conditions.length, 0)} 条件)
+                </span>
+              ),
+              children: (
+                <div>
+                  {openShortGroups.map((_, index) =>
+                    renderConditionGroup('开空', openShortGroups, setOpenShortGroups, index, SELL_INDICATORS, 'OPEN_SHORT', false)
+                  )}
+                </div>
+              ),
+            },
+            {
+              key: 'close_short',
+              label: (
+                <span>
+                  📈 平空买入规则 ({closeShortGroups.reduce((acc, g) => acc + g.conditions.length, 0)} 条件)
+                </span>
+              ),
+              children: (
+                <div>
+                  {closeShortGroups.map((_, index) =>
+                    renderConditionGroup('平空', closeShortGroups, setCloseShortGroups, index, BUY_INDICATORS, 'CLOSE_SHORT', true)
+                  )}
+                </div>
+              ),
+            },
+          ]}
+        />
 
         <Divider />
-
-        <Card title="预览策略配置JSON" size="small">
-          <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 4, maxHeight: 400, overflow: 'auto' }}>
+        <Card title="预览策略配置 JSON" size="small">
+          <pre
+            style={{
+              background: '#f5f5f5',
+              padding: 12,
+              borderRadius: 4,
+              maxHeight: 280,
+              overflow: 'auto',
+              fontFamily: 'monospace',
+            }}
+          >
             {JSON.stringify(generateConfig(), null, 2)}
           </pre>
         </Card>

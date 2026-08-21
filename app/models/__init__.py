@@ -37,11 +37,17 @@ class Symbol(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     exchange_name = Column(String(32), nullable=False, default="OKX")
-    inst_id = Column(String(64), unique=True, nullable=False, index=True)  # 如 BTC-USDT-SWAP
-    base_ccy = Column(String(32), nullable=True)
-    quote_ccy = Column(String(32), nullable=True)
-    inst_type = Column(String(32), nullable=True)  # SWAP / SPOT 等
+    inst_id = Column(String(64), unique=True, nullable=False, index=True)  # 如 BTC-USDT-SWAP, XAU-USDT-SWAP, NVDA-USDT-SWAP
+    base_ccy = Column(String(32), nullable=True)  # BTC, XAU, NVDA, OIL 等
+    quote_ccy = Column(String(32), nullable=True, default="USDT")  # USDT, USD 等
+    inst_type = Column(String(32), nullable=True, default="SWAP")  # SWAP / SPOT / COMMODITY / STOCK / INDEX
+    category = Column(String(32), nullable=True, default="CRYPTO")  # CRYPTO / COMMODITY / STOCK / INDEX / FOREX / CUSTOM
+    display_name = Column(String(128), nullable=True)  # 如: XAU/USDT 黄金永续合约
+    description = Column(String(256), nullable=True)  # 补充说明
+    is_custom = Column(Boolean, default=False)  # 是否为用户自定义品种
     is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 
 
 class Kline(Base):
@@ -72,7 +78,10 @@ class Strategy(Base):
     symbol_id = Column(Integer, ForeignKey("symbols.id"), nullable=False)
     timeframe = Column(String(16), nullable=False)
     leverage = Column(Float, nullable=True)
-    monitor_interval_sec = Column(Integer, default=20)
+    monitor_interval_sec = Column(Integer, default=60)
+    stop_loss_pct = Column(Float, nullable=True)  # 止损比例（如 2.0 代表 2%）
+    take_profit_pct = Column(Float, nullable=True)  # 止盈比例（如 5.0 代表 5%）
+    trailing_stop_pct = Column(Float, nullable=True)  # 移动追踪止损（如 1.5 代表从最高点回撤 1.5%）
     status = Column(String(32), default="DRAFT")  # DRAFT/ACTIVE/INACTIVE
     config_json = Column(Text, nullable=False)
     created_from_ai = Column(Boolean, default=False)
@@ -140,3 +149,14 @@ class AccountEquitySnapshot(Base):
     id = Column(Integer, primary_key=True, index=True)
     ts = Column(DateTime, default=datetime.utcnow)
     equity = Column(Float, nullable=False)
+
+
+class NotificationConfig(Base):
+    __tablename__ = "notification_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    channel = Column(String(32), unique=True, nullable=False)  # TELEGRAM / FEISHU / WECHAT / DINGTALK
+    config_json = Column(Text, nullable=False)
+    is_enabled = Column(Boolean, default=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+

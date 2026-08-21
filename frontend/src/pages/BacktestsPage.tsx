@@ -17,6 +17,7 @@ import {
   Popconfirm,
   Divider,
   Typography,
+  Tabs,
 } from 'antd'
 import {
   EyeOutlined,
@@ -24,7 +25,14 @@ import {
   DatabaseOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
+  RiseOutlined,
+  LineChartOutlined,
+  UnorderedListOutlined,
+  RobotOutlined,
+  CheckCircleOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
+
 import { Link, useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import ReactECharts from 'echarts-for-react'
@@ -39,6 +47,9 @@ interface StrategyOption {
   symbol_id: number
   timeframe: string
   description?: string
+  stop_loss_pct?: number | null
+  take_profit_pct?: number | null
+  trailing_stop_pct?: number | null
 }
 
 interface KlineStats {
@@ -61,14 +72,41 @@ interface BacktestRow {
   created_at?: string
 }
 
+interface TradeRecord {
+  id: number
+  position_side?: string
+  entry_time: string
+  entry_price: number
+  exit_time: string
+  exit_price: number
+  qty: number
+  pnl: number
+  pnl_pct: number
+  fee: number
+  exit_reason: string
+  holding_bars: number
+}
+
+
 interface BacktestResult {
   equity_curve: Array<{ ts: string; equity: number }>
+  benchmark_curve?: Array<{ ts: string; equity: number }>
+  trades_list?: TradeRecord[]
   trade_count: number
+  win_count?: number
+  loss_count?: number
   total_return?: number
+  benchmark_return?: number
   win_rate?: number
   sharpe_ratio?: number
   max_drawdown?: number
   profit_factor?: number
+  avg_trade_pnl?: number
+  max_win?: number
+  max_loss?: number
+  stop_loss_pct?: number | null
+  take_profit_pct?: number | null
+  trailing_stop_pct?: number | null
 }
 
 const BacktestsPage: React.FC = () => {
@@ -85,6 +123,86 @@ const BacktestsPage: React.FC = () => {
   // 回测结果弹窗
   const [resultModal, setResultModal] = useState(false)
   const [currentResult, setCurrentResult] = useState<BacktestRow | null>(null)
+
+  // AI 回测诊断与调优弹窗
+  const [aiDiagModalOpen, setAiDiagModalOpen] = useState(false)
+  const [aiDiagLoading, setAiDiagLoading] = useState(false)
+  const [aiDiagResult, setAiDiagResult] = useState<any | null>(null)
+  const [savingAiStrategy, setSavingAiStrategy] = useState(false)
+
+  const handleOpenAiDiagnosis = () => {
+    if (!currentResult) return
+    const result = parseResult(currentResult)
+    if (!result) return
+    const strat = strategies.find(s => s.id === currentResult.strategy_id)
+    const { profitPct } = calculateProfit(result, currentResult.initial_balance)
+    const winTrades = (result.trades_list || []).filter(t => t.pnl > 0).length
+    const lossTrades = (result.trades_list || []).filter(t => t.pnl < 0).length
+
+    setAiDiagModalOpen(true)
+    setAiDiagLoading(true)
+    setAiDiagResult(null)
+
+    api
+      .post('/ai/diagnose-backtest', {
+        strategy_id: currentResult.strategy_id,
+        strategy_name: strat?.name || `策略 #${currentResult.strategy_id}`,
+        timeframe: strat?.timeframe || '1H',
+        config_json: strat ? strat.config_json : null,
+        total_return: profitPct,
+        benchmark_return: result.benchmark_return || 0.0,
+        win_rate: result.win_rate || (result.trades_count > 0 ? (winTrades / result.trades_count) * 100 : 0),
+        sharpe_ratio: result.sharpe_ratio || 0.0,
+        max_drawdown: result.max_drawdown || 0.0,
+        profit_factor: result.profit_factor || 1.0,
+        trade_count: result.trades_count || (result.trades_list ? result.trades_list.length : 0),
+        win_count: winTrades,
+        loss_count: lossTrades,
+        stop_loss_pct: result.stop_loss_pct,
+        take_profit_pct: result.take_profit_pct,
+        trailing_stop_pct: result.trailing_stop_pct,
+      })
+      .then(res => {
+        setAiDiagResult(res.data)
+      })
+      .catch(err => {
+        message.error('AI 诊断生成失败: ' + (err.response?.data?.detail || err.message))
+      })
+      .finally(() => setAiDiagLoading(false))
+  }
+
+  const handleSaveAiStrategy = () => {
+    if (!aiDiagResult || !aiDiagResult.optimized_strategy || !currentResult) return
+    const strat = strategies.find(s => s.id === currentResult.strategy_id)
+    setSavingAiStrategy(true)
+    const opt = aiDiagResult.optimized_strategy
+    api
+      .post('/strategies/', {
+        name: opt.name || `${strat?.name || '策略'} (AI调优版)`,
+        description: opt.description || '由AI根据回测数据调优生成',
+        symbol_id: strat?.symbol_id || 1,
+        timeframe: strat?.timeframe || '1H',
+        leverage: 1.0,
+        monitor_interval_sec: 60,
+        stop_loss_pct: opt.stop_loss_pct,
+        take_profit_pct: opt.take_profit_pct,
+        trailing_stop_pct: opt.trailing_stop_pct,
+        config_json:
+          typeof opt.config_json === 'string'
+            ? opt.config_json
+            : JSON.stringify(opt.config_json, null, 2),
+      })
+      .then(() => {
+        message.success('已成功将 AI 调优方案保存为全新策略！')
+        setAiDiagModalOpen(false)
+        loadData()
+      })
+      .catch(err => {
+        message.error('保存新策略失败: ' + (err.response?.data?.detail || err.message))
+      })
+      .finally(() => setSavingAiStrategy(false))
+  }
+
 
   const loadData = () => {
     setLoading(true)
@@ -223,20 +341,53 @@ const BacktestsPage: React.FC = () => {
     return { profit, profitPct, finalEquity }
   }
 
-  // 权益曲线配置
-  const getEquityChartOption = (equityCurve: Array<{ ts: string; equity: number }>) => {
+  // 权益曲线配置（支持策略收益 vs 买入持有基准双曲线）
+  const getEquityChartOption = (
+    equityCurve: Array<{ ts: string; equity: number }>,
+    benchmarkCurve?: Array<{ ts: string; equity: number }>
+  ) => {
+    const series: any[] = [
+      {
+        name: '策略净值',
+        type: 'line',
+        data: equityCurve.map(p => p.equity),
+        smooth: true,
+        showSymbol: false,
+        areaStyle: {
+          color: 'rgba(24, 144, 255, 0.15)',
+        },
+        lineStyle: { width: 2.5, color: '#1890ff' },
+      },
+    ]
+
+    const legendData = ['策略净值']
+
+    if (benchmarkCurve && benchmarkCurve.length > 0) {
+      legendData.push('买入持有基准 (Buy & Hold)')
+      series.push({
+        name: '买入持有基准 (Buy & Hold)',
+        type: 'line',
+        data: benchmarkCurve.map(p => p.equity),
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 1.8, color: '#fa8c16', type: 'dashed' },
+      })
+    }
+
     return {
-      title: { text: '权益走势曲线', left: 'center' },
+      title: { text: '策略净值走势 vs 买入持有基准', left: 'center' },
       tooltip: {
         trigger: 'axis',
-        formatter: (params: any) => {
-          const point = params[0]
-          return `${dayjs(point.name).format('YYYY-MM-DD HH:mm')}<br/>账户权益: <b>${Number(
-            point.value
-          ).toFixed(2)} USDT</b>`
+        formatter: (params: any[]) => {
+          let content = `${dayjs(params[0].name).format('YYYY-MM-DD HH:mm')}<br/>`
+          params.forEach(p => {
+            content += `${p.marker} ${p.seriesName}: <b>${Number(p.value).toFixed(2)} USDT</b><br/>`
+          })
+          return content
         },
       },
-      grid: { left: '4%', right: '4%', bottom: '8%', containLabel: true },
+      legend: { top: 28, data: legendData },
+      grid: { left: '4%', right: '4%', bottom: '8%', top: '16%', containLabel: true },
       xAxis: {
         type: 'category',
         data: equityCurve.map(p => p.ts),
@@ -249,21 +400,29 @@ const BacktestsPage: React.FC = () => {
         name: 'USDT',
         scale: true,
       },
-      series: [
-        {
-          name: '权益',
-          type: 'line',
-          data: equityCurve.map(p => p.equity),
-          smooth: true,
-          showSymbol: false,
-          areaStyle: {
-            color: 'rgba(24, 144, 255, 0.2)',
-          },
-          lineStyle: { width: 2, color: '#1890ff' },
-        },
-      ],
+      series,
     }
   }
+
+  // 平仓原因标签
+  const renderExitReasonTag = (reason: string) => {
+    switch (reason) {
+      case 'TAKE_PROFIT':
+        return <Tag color="success">🎯 止盈平仓</Tag>
+      case 'STOP_LOSS':
+        return <Tag color="error">⚠️ 止损平仓</Tag>
+      case 'TRAILING_STOP':
+        return <Tag color="warning">🛡️ 移动止盈止损</Tag>
+      case 'SIGNAL_CLOSE_LONG':
+      case 'SIGNAL_SELL':
+        return <Tag color="blue">🔴 平多信号</Tag>
+      case 'SIGNAL_CLOSE_SHORT':
+        return <Tag color="purple">🟣 平空信号</Tag>
+      default:
+        return <Tag color="blue">{reason}</Tag>
+    }
+  }
+
 
   return (
     <div style={{ padding: 24 }}>
@@ -272,6 +431,7 @@ const BacktestsPage: React.FC = () => {
           <Space>
             <span>策略回测</span>
             <Tag color="blue">本地数据驱动</Tag>
+            <Tag color="purple">风控模拟</Tag>
           </Space>
         }
         extra={
@@ -346,11 +506,11 @@ const BacktestsPage: React.FC = () => {
               </Col>
             </Row>
 
-            {/* 数据集详情提示卡片 */}
+            {/* 数据集与风控详情提示卡片 */}
             {selectedKlineData && (
               <Alert
                 style={{ marginTop: 8, marginBottom: 16 }}
-                message="已选定回测数据集"
+                message="已选定回测数据集与风控参数"
                 description={
                   <Row gutter={[16, 8]} align="middle">
                     <Col span={24}>
@@ -376,6 +536,21 @@ const BacktestsPage: React.FC = () => {
                               : 'N/A'}
                           </Tag>
                         </span>
+                        {selectedStrategy?.stop_loss_pct && (
+                          <span>
+                            🛡️ 止损: <Tag color="red">-{selectedStrategy.stop_loss_pct}%</Tag>
+                          </span>
+                        )}
+                        {selectedStrategy?.take_profit_pct && (
+                          <span>
+                            🎯 止盈: <Tag color="green">+{selectedStrategy.take_profit_pct}%</Tag>
+                          </span>
+                        )}
+                        {selectedStrategy?.trailing_stop_pct && (
+                          <span>
+                            🔄 移动追踪: <Tag color="orange">{selectedStrategy.trailing_stop_pct}%</Tag>
+                          </span>
+                        )}
                       </Space>
                     </Col>
                   </Row>
@@ -477,7 +652,7 @@ const BacktestsPage: React.FC = () => {
               render: (val: number) => `${val?.toFixed(2)} USDT`,
             },
             {
-              title: '收益率概览',
+              title: '策略收益率',
               width: 130,
               render: (_, record: BacktestRow) => {
                 const res = parseResult(record)
@@ -491,12 +666,34 @@ const BacktestsPage: React.FC = () => {
               },
             },
             {
+              title: '基准收益(Buy&Hold)',
+              width: 150,
+              render: (_, record: BacktestRow) => {
+                const res = parseResult(record)
+                if (!res || res.benchmark_return === undefined) return '-'
+                const ret = res.benchmark_return
+                return (
+                  <Tag color={ret >= 0 ? 'orange' : 'default'}>
+                    {ret >= 0 ? `+${ret.toFixed(2)}%` : `${ret.toFixed(2)}%`}
+                  </Tag>
+                )
+              },
+            },
+            {
               title: '胜率',
               width: 100,
               render: (_, record: BacktestRow) => {
                 const res = parseResult(record)
                 if (!res || res.win_rate === undefined) return '-'
                 return `${res.win_rate.toFixed(1)}%`
+              },
+            },
+            {
+              title: '总交易笔数',
+              width: 110,
+              render: (_, record: BacktestRow) => {
+                const res = parseResult(record)
+                return res?.trade_count ?? '-'
               },
             },
             {
@@ -545,18 +742,28 @@ const BacktestsPage: React.FC = () => {
           ]}
         />
 
-        {/* 回测结果详情弹窗 */}
+        {/* 回测结果详情弹窗（双Tab：收益与对比走势 / 逐笔交易明细） */}
         <Modal
-          title="回测结果分析报告"
+          title="回测结果综合分析报告"
           open={resultModal}
           onCancel={() => setResultModal(false)}
-          width={920}
+          width={1000}
           footer={[
-            <Button key="close" type="primary" onClick={() => setResultModal(false)}>
-              关闭
+            <Button
+              key="ai-diag"
+              type="primary"
+              style={{ background: '#722ed1', borderColor: '#722ed1' }}
+              icon={<RobotOutlined />}
+              onClick={handleOpenAiDiagnosis}
+            >
+              🤖 AI 深度诊断与自动调优
+            </Button>,
+            <Button key="close" onClick={() => setResultModal(false)}>
+              关闭报告
             </Button>,
           ]}
         >
+
           {currentResult &&
             (() => {
               const result = parseResult(currentResult)
@@ -572,7 +779,7 @@ const BacktestsPage: React.FC = () => {
 
               return (
                 <div>
-                  {/* 策略基本信息 */}
+                  {/* 策略基本信息与风控参数 */}
                   <div
                     style={{
                       marginBottom: 16,
@@ -581,159 +788,468 @@ const BacktestsPage: React.FC = () => {
                       borderRadius: 6,
                     }}
                   >
-                    <Space size="large">
-                      <span>
-                        🎯 策略名称: <b>{strat?.name || `策略 #${currentResult.strategy_id}`}</b>
-                      </span>
-                      <span>
-                        📅 回测区间:{' '}
-                        <b>
-                          {dayjs(currentResult.start_ts).format('YYYY-MM-DD HH:mm')} ~{' '}
-                          {dayjs(currentResult.end_ts).format('YYYY-MM-DD HH:mm')}
-                        </b>
-                      </span>
-                    </Space>
+                    <Row justify="space-between" align="middle">
+                      <Col>
+                        <Space size="middle" wrap>
+                          <span>
+                            🎯 策略: <b>{strat?.name || `策略 #${currentResult.strategy_id}`}</b>
+                          </span>
+                          <span>
+                            📅 区间:{' '}
+                            <b>
+                              {dayjs(currentResult.start_ts).format('YYYY-MM-DD HH:mm')} ~{' '}
+                              {dayjs(currentResult.end_ts).format('YYYY-MM-DD HH:mm')}
+                            </b>
+                          </span>
+                        </Space>
+                      </Col>
+                      <Col>
+                        <Space>
+                          {result.stop_loss_pct ? (
+                            <Tag color="red">止损: -{result.stop_loss_pct}%</Tag>
+                          ) : null}
+                          {result.take_profit_pct ? (
+                            <Tag color="green">止盈: +{result.take_profit_pct}%</Tag>
+                          ) : null}
+                          {result.trailing_stop_pct ? (
+                            <Tag color="orange">移动止损: {result.trailing_stop_pct}%</Tag>
+                          ) : null}
+                        </Space>
+                      </Col>
+                    </Row>
                   </div>
 
-                  {/* 核心收益指标 */}
-                  <Row gutter={16} style={{ marginBottom: 20 }}>
-                    <Col span={6}>
-                      <Card size="small">
-                        <Statistic
-                          title="初始资金"
-                          value={currentResult.initial_balance}
-                          precision={2}
-                          suffix="USDT"
-                        />
-                      </Card>
-                    </Col>
-                    <Col span={6}>
-                      <Card size="small">
-                        <Statistic
-                          title="最终权益"
-                          value={finalEquity}
-                          precision={2}
-                          suffix="USDT"
-                        />
-                      </Card>
-                    </Col>
-                    <Col span={6}>
-                      <Card size="small">
-                        <Statistic
-                          title="净盈亏"
-                          value={profit}
-                          precision={2}
-                          suffix="USDT"
-                          valueStyle={{ color: profit >= 0 ? '#3f8600' : '#cf1322' }}
-                          prefix={profit >= 0 ? '+' : ''}
-                        />
-                      </Card>
-                    </Col>
-                    <Col span={6}>
-                      <Card size="small">
-                        <Statistic
-                          title="总收益率"
-                          value={result.total_return ?? profitPct}
-                          precision={2}
-                          suffix="%"
-                          valueStyle={{
-                            color: (result.total_return ?? profitPct) >= 0 ? '#3f8600' : '#cf1322',
-                          }}
-                          prefix={(result.total_return ?? profitPct) >= 0 ? '+' : ''}
-                        />
-                      </Card>
-                    </Col>
-                  </Row>
+                  <Tabs
+                    defaultActiveKey="overview"
+                    items={[
+                      {
+                        key: 'overview',
+                        label: (
+                          <span>
+                            <LineChartOutlined /> 收益指标与走势对比
+                          </span>
+                        ),
+                        children: (
+                          <div>
+                            {/* 核心收益指标 */}
+                            <Row gutter={16} style={{ marginBottom: 16 }}>
+                              <Col span={6}>
+                                <Card size="small">
+                                  <Statistic
+                                    title="初始资金"
+                                    value={currentResult.initial_balance}
+                                    precision={2}
+                                    suffix="USDT"
+                                  />
+                                </Card>
+                              </Col>
+                              <Col span={6}>
+                                <Card size="small">
+                                  <Statistic
+                                    title="最终权益"
+                                    value={finalEquity}
+                                    precision={2}
+                                    suffix="USDT"
+                                  />
+                                </Card>
+                              </Col>
+                              <Col span={6}>
+                                <Card size="small">
+                                  <Statistic
+                                    title="净盈亏"
+                                    value={profit}
+                                    precision={2}
+                                    suffix="USDT"
+                                    valueStyle={{ color: profit >= 0 ? '#3f8600' : '#cf1322' }}
+                                    prefix={profit >= 0 ? '+' : ''}
+                                  />
+                                </Card>
+                              </Col>
+                              <Col span={6}>
+                                <Card size="small">
+                                  <Statistic
+                                    title="策略总收益率"
+                                    value={result.total_return ?? profitPct}
+                                    precision={2}
+                                    suffix="%"
+                                    valueStyle={{
+                                      color: (result.total_return ?? profitPct) >= 0 ? '#3f8600' : '#cf1322',
+                                    }}
+                                    prefix={(result.total_return ?? profitPct) >= 0 ? '+' : ''}
+                                  />
+                                </Card>
+                              </Col>
+                            </Row>
 
-                  {/* 交易分析指标 */}
-                  <Row gutter={16} style={{ marginBottom: 20 }}>
-                    <Col span={6}>
-                      <Card size="small">
-                        <Statistic title="总交易次数" value={result.trade_count} />
-                      </Card>
-                    </Col>
-                    <Col span={6}>
-                      <Card size="small">
-                        <Statistic
-                          title="胜率"
-                          value={result.win_rate ?? 0}
-                          precision={2}
-                          suffix="%"
-                          valueStyle={{
-                            color: (result.win_rate ?? 0) >= 50 ? '#3f8600' : '#cf1322',
-                          }}
-                        />
-                      </Card>
-                    </Col>
-                    <Col span={6}>
-                      <Card size="small">
-                        <Statistic
-                          title="盈亏比"
-                          value={result.profit_factor ?? 0}
-                          precision={2}
-                          valueStyle={{
-                            color: (result.profit_factor ?? 0) >= 1 ? '#3f8600' : '#cf1322',
-                          }}
-                        />
-                      </Card>
-                    </Col>
-                    <Col span={6}>
-                      <Card size="small">
-                        <Statistic
-                          title="夏普比率"
-                          value={result.sharpe_ratio ?? 0}
-                          precision={3}
-                          valueStyle={{
-                            color:
-                              (result.sharpe_ratio ?? 0) >= 1
-                                ? '#3f8600'
-                                : (result.sharpe_ratio ?? 0) >= 0
-                                ? '#faad14'
-                                : '#cf1322',
-                          }}
-                        />
-                      </Card>
-                    </Col>
-                  </Row>
+                            {/* 交易分析指标与基准对比 */}
+                            <Row gutter={16} style={{ marginBottom: 16 }}>
+                              <Col span={6}>
+                                <Card size="small">
+                                  <Statistic
+                                    title="买入持有基准收益"
+                                    value={result.benchmark_return ?? 0}
+                                    precision={2}
+                                    suffix="%"
+                                    valueStyle={{
+                                      color: (result.benchmark_return ?? 0) >= 0 ? '#d46b08' : '#cf1322',
+                                    }}
+                                    prefix={(result.benchmark_return ?? 0) >= 0 ? '+' : ''}
+                                  />
+                                </Card>
+                              </Col>
+                              <Col span={6}>
+                                <Card size="small">
+                                  <Statistic
+                                    title="胜率 (盈利/亏损)"
+                                    value={result.win_rate ?? 0}
+                                    precision={1}
+                                    suffix={`% (${result.win_count || 0}/${result.loss_count || 0})`}
+                                    valueStyle={{
+                                      color: (result.win_rate ?? 0) >= 50 ? '#3f8600' : '#cf1322',
+                                    }}
+                                  />
+                                </Card>
+                              </Col>
+                              <Col span={6}>
+                                <Card size="small">
+                                  <Statistic
+                                    title="盈亏比 (Profit Factor)"
+                                    value={result.profit_factor ?? 0}
+                                    precision={2}
+                                    valueStyle={{
+                                      color: (result.profit_factor ?? 0) >= 1 ? '#3f8600' : '#cf1322',
+                                    }}
+                                  />
+                                </Card>
+                              </Col>
+                              <Col span={6}>
+                                <Card size="small">
+                                  <Statistic
+                                    title="夏普比率"
+                                    value={result.sharpe_ratio ?? 0}
+                                    precision={3}
+                                    valueStyle={{
+                                      color:
+                                        (result.sharpe_ratio ?? 0) >= 1
+                                          ? '#3f8600'
+                                          : (result.sharpe_ratio ?? 0) >= 0
+                                          ? '#faad14'
+                                          : '#cf1322',
+                                    }}
+                                  />
+                                </Card>
+                              </Col>
+                            </Row>
 
-                  {/* 风险指标 */}
-                  <Row gutter={16} style={{ marginBottom: 20 }}>
-                    <Col span={12}>
-                      <Card size="small">
-                        <Statistic
-                          title="最大回撤 (Max Drawdown)"
-                          value={result.max_drawdown ?? 0}
-                          precision={2}
-                          suffix="%"
-                          valueStyle={{ color: '#cf1322' }}
-                        />
-                      </Card>
-                    </Col>
-                    <Col span={12}>
-                      <Card size="small">
-                        <Statistic
-                          title="回测 K 线数据点数"
-                          value={result.equity_curve.length}
-                          suffix="个周期点"
-                        />
-                      </Card>
-                    </Col>
-                  </Row>
+                            {/* 风险与单笔指标 */}
+                            <Row gutter={16} style={{ marginBottom: 16 }}>
+                              <Col span={6}>
+                                <Card size="small">
+                                  <Statistic
+                                    title="最大回撤 (Max Drawdown)"
+                                    value={result.max_drawdown ?? 0}
+                                    precision={2}
+                                    suffix="%"
+                                    valueStyle={{ color: '#cf1322' }}
+                                  />
+                                </Card>
+                              </Col>
+                              <Col span={6}>
+                                <Card size="small">
+                                  <Statistic
+                                    title="平均每笔盈亏"
+                                    value={result.avg_trade_pnl ?? 0}
+                                    precision={2}
+                                    suffix="USDT"
+                                  />
+                                </Card>
+                              </Col>
+                              <Col span={6}>
+                                <Card size="small">
+                                  <Statistic
+                                    title="单笔最大盈利"
+                                    value={result.max_win ?? 0}
+                                    precision={2}
+                                    suffix="USDT"
+                                    valueStyle={{ color: '#3f8600' }}
+                                    prefix="+"
+                                  />
+                                </Card>
+                              </Col>
+                              <Col span={6}>
+                                <Card size="small">
+                                  <Statistic
+                                    title="单笔最大亏损"
+                                    value={result.max_loss ?? 0}
+                                    precision={2}
+                                    suffix="USDT"
+                                    valueStyle={{ color: '#cf1322' }}
+                                  />
+                                </Card>
+                              </Col>
+                            </Row>
 
-                  {/* 权益曲线图表 */}
-                  {result.equity_curve && result.equity_curve.length > 0 && (
-                    <Card size="small" title="权益曲线图">
-                      <ReactECharts
-                        option={getEquityChartOption(result.equity_curve)}
-                        style={{ height: 380 }}
-                        notMerge
-                        lazyUpdate
-                      />
-                    </Card>
-                  )}
+                            {/* 双曲线图表 */}
+                            {result.equity_curve && result.equity_curve.length > 0 && (
+                              <Card size="small">
+                                <ReactECharts
+                                  option={getEquityChartOption(
+                                    result.equity_curve,
+                                    result.benchmark_curve
+                                  )}
+                                  style={{ height: 380 }}
+                                  notMerge
+                                  lazyUpdate
+                                />
+                              </Card>
+                            )}
+                          </div>
+                        ),
+                      },
+                      {
+                        key: 'trades',
+                        label: (
+                          <span>
+                            <UnorderedListOutlined /> 逐笔交易明细 ({result.trades_list?.length || 0} 笔)
+                          </span>
+                        ),
+                        children: (
+                          <Table
+                            rowKey="id"
+                            dataSource={result.trades_list || []}
+                            size="small"
+                            pagination={{ pageSize: 8 }}
+                            columns={[
+                              { title: '#', dataIndex: 'id', width: 50 },
+                              {
+                                title: '方向',
+                                dataIndex: 'position_side',
+                                width: 85,
+                                render: (s: string) =>
+                                  s === 'SHORT' ? (
+                                    <Tag color="volcano">📉 做空</Tag>
+                                  ) : (
+                                    <Tag color="cyan">📈 做多</Tag>
+                                  ),
+                              },
+                              {
+                                title: '开仓时间',
+                                dataIndex: 'entry_time',
+                                width: 140,
+                                render: (ts: string) => dayjs(ts).format('YYYY-MM-DD HH:mm'),
+                              },
+
+                              {
+                                title: '开仓价格',
+                                dataIndex: 'entry_price',
+                                width: 110,
+                                render: (p: number) => `${p.toFixed(2)} USDT`,
+                              },
+                              {
+                                title: '平仓时间',
+                                dataIndex: 'exit_time',
+                                width: 140,
+                                render: (ts: string) => dayjs(ts).format('YYYY-MM-DD HH:mm'),
+                              },
+                              {
+                                title: '平仓价格',
+                                dataIndex: 'exit_price',
+                                width: 110,
+                                render: (p: number) => `${p.toFixed(2)} USDT`,
+                              },
+                              {
+                                title: '持仓周期',
+                                dataIndex: 'holding_bars',
+                                width: 80,
+                                render: (bars: number) => `${bars} 根`,
+                              },
+                              {
+                                title: '盈亏金额',
+                                dataIndex: 'pnl',
+                                width: 110,
+                                render: (pnl: number) => (
+                                  <Text strong style={{ color: pnl >= 0 ? '#3f8600' : '#cf1322' }}>
+                                    {pnl >= 0 ? `+${pnl.toFixed(2)}` : pnl.toFixed(2)} USDT
+                                  </Text>
+                                ),
+                              },
+                              {
+                                title: '收益率',
+                                dataIndex: 'pnl_pct',
+                                width: 100,
+                                render: (pct: number) => (
+                                  <Tag color={pct >= 0 ? 'green' : 'red'}>
+                                    {pct >= 0 ? `+${pct.toFixed(2)}%` : `${pct.toFixed(2)}%`}
+                                  </Tag>
+                                ),
+                              },
+                              {
+                                title: '手续费',
+                                dataIndex: 'fee',
+                                width: 90,
+                                render: (fee: number) => `${fee.toFixed(2)} U`,
+                              },
+                              {
+                                title: '平仓触发原因',
+                                dataIndex: 'exit_reason',
+                                width: 130,
+                                render: (reason: string) => renderExitReasonTag(reason),
+                              },
+                            ]}
+                          />
+                        ),
+                      },
+                    ]}
+                  />
                 </div>
               )
             })()}
+        </Modal>
+
+        {/* 🤖 AI 深度诊断与自动调优报告弹窗 */}
+        <Modal
+          title={
+            <Space>
+              <RobotOutlined style={{ color: '#722ed1', fontSize: 20 }} />
+              <span>AI 策略回测深度诊断与自动调优建议</span>
+            </Space>
+          }
+          open={aiDiagModalOpen}
+          onCancel={() => setAiDiagModalOpen(false)}
+          width={880}
+          footer={[
+            <Button key="close" onClick={() => setAiDiagModalOpen(false)}>
+              关闭
+            </Button>,
+            aiDiagResult && aiDiagResult.optimized_strategy && (
+              <Button
+                key="apply"
+                type="primary"
+                icon={<CheckCircleOutlined />}
+                style={{ background: '#722ed1', borderColor: '#722ed1' }}
+                onClick={handleSaveAiStrategy}
+                loading={savingAiStrategy}
+              >
+                一键保存为 AI 调优新策略
+              </Button>
+            ),
+          ]}
+        >
+          {aiDiagLoading && (
+            <div style={{ textAlign: 'center', padding: '50px 0' }}>
+              <RobotOutlined style={{ fontSize: 36, color: '#722ed1', marginBottom: 16 }} spin />
+              <div style={{ fontSize: 16, fontWeight: 'bold' }}>AI 正在深度解析逐笔回测数据与市场行情...</div>
+              <div style={{ color: '#8c8c8c', marginTop: 8 }}>
+                正在评估盈亏比、最大回撤瓶颈、止损有效性与假突破分布
+              </div>
+            </div>
+          )}
+
+          {aiDiagResult && (
+            <div>
+              {/* 综合评级卡片 */}
+              <div
+                style={{
+                  background: '#f9f0ff',
+                  border: '1px solid #d3adf7',
+                  padding: '16px 20px',
+                  borderRadius: 8,
+                  marginBottom: 16,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <div>
+                  <Space size="middle" align="center">
+                    <span style={{ fontSize: 15, fontWeight: 'bold', color: '#531dab' }}>
+                      策略综合表现评级:
+                    </span>
+                    <Tag
+                      color={
+                        aiDiagResult.overall_rating === 'S'
+                          ? 'gold'
+                          : aiDiagResult.overall_rating === 'A'
+                          ? 'green'
+                          : aiDiagResult.overall_rating === 'B'
+                          ? 'blue'
+                          : aiDiagResult.overall_rating === 'C'
+                          ? 'orange'
+                          : 'red'
+                      }
+                      style={{ fontSize: 16, padding: '4px 12px', fontWeight: 'bold' }}
+                    >
+                      {aiDiagResult.overall_rating} 级 · {aiDiagResult.rating_label}
+                    </Tag>
+                  </Space>
+                  <div style={{ marginTop: 8, color: '#595959', fontSize: 13 }}>
+                    {aiDiagResult.summary}
+                  </div>
+                </div>
+              </div>
+
+              {/* 亮点与瓶颈 */}
+              <Row gutter={16} style={{ marginBottom: 16 }}>
+                <Col span={12}>
+                  <Card size="small" title="✅ 策略优势亮点" style={{ height: '100%' }}>
+                    <ul style={{ paddingLeft: 20, margin: 0 }}>
+                      {aiDiagResult.strengths?.map((s: string, idx: number) => (
+                        <li key={idx} style={{ marginBottom: 6, color: '#3f8600' }}>
+                          {s}
+                        </li>
+                      ))}
+                    </ul>
+                  </Card>
+                </Col>
+                <Col span={12}>
+                  <Card size="small" title="⚠️ 核心痛点与风险剖析" style={{ height: '100%' }}>
+                    <ul style={{ paddingLeft: 20, margin: 0 }}>
+                      {aiDiagResult.bottlenecks?.map((b: string, idx: number) => (
+                        <li key={idx} style={{ marginBottom: 6, color: '#cf1322' }}>
+                          {b}
+                        </li>
+                      ))}
+                    </ul>
+                  </Card>
+                </Col>
+              </Row>
+
+              {/* 调优建议 */}
+              <Card size="small" title="💡 AI 专家调优与改进建议" style={{ marginBottom: 16 }}>
+                <ol style={{ paddingLeft: 20, margin: 0 }}>
+                  {aiDiagResult.suggestions?.map((sug: string, idx: number) => (
+                    <li key={idx} style={{ marginBottom: 6, fontWeight: 500 }}>
+                      {sug}
+                    </li>
+                  ))}
+                </ol>
+              </Card>
+
+              {/* 推荐优化后方案 */}
+              {aiDiagResult.optimized_strategy && (
+                <Card
+                  size="small"
+                  title="🎯 AI 推荐调优方案"
+                  style={{ background: '#f6ffed', border: '1px solid #b7eb8f' }}
+                >
+                  <Row gutter={16} style={{ marginBottom: 8 }}>
+                    <Col span={8}>
+                      🛡️ 推荐止损: <b>-{aiDiagResult.optimized_strategy.stop_loss_pct}%</b>
+                    </Col>
+                    <Col span={8}>
+                      🎯 推荐止盈: <b>+{aiDiagResult.optimized_strategy.take_profit_pct}%</b>
+                    </Col>
+                    <Col span={8}>
+                      🔄 移动追踪: <b>{aiDiagResult.optimized_strategy.trailing_stop_pct}%</b>
+                    </Col>
+                  </Row>
+                  <div style={{ fontSize: 12, color: '#52c41a' }}>
+                    * 点击下方「一键保存为 AI 调优新策略」即可自动生成并将其存入策略库供独立回测与实盘。
+                  </div>
+                </Card>
+              )}
+            </div>
+          )}
         </Modal>
       </Card>
     </div>
@@ -741,4 +1257,6 @@ const BacktestsPage: React.FC = () => {
 }
 
 export default BacktestsPage
+
+
 

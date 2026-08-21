@@ -85,23 +85,44 @@ def create_backtest(payload: BacktestCreate, db: Session = Depends(get_db)) -> A
         )
 
         rule_set = json.loads(strategy.config_json)
-        result = run_backtest(df, rule_set, initial_balance=payload.initial_balance)
+        result = run_backtest(
+            df=df,
+            rule_set=rule_set,
+            initial_balance=payload.initial_balance,
+            stop_loss_pct=strategy.stop_loss_pct,
+            take_profit_pct=strategy.take_profit_pct,
+            trailing_stop_pct=strategy.trailing_stop_pct,
+            fee_rate=payload.fee_rate,
+            slippage_pct=payload.slippage_pct,
+        )
 
 
         bt.status = "FINISHED"
         bt.result_json = json.dumps({
             "equity_curve": result.equity_curve,
-            "trade_count": len(result.trades),
+            "benchmark_curve": result.benchmark_curve,
+            "trades_list": result.trades_list,
+            "trade_count": result.trade_count,
+            "win_count": result.win_count,
+            "loss_count": result.loss_count,
             "total_return": result.total_return,
+            "benchmark_return": result.benchmark_return,
             "win_rate": result.win_rate,
             "sharpe_ratio": result.sharpe_ratio,
             "max_drawdown": result.max_drawdown,
             "profit_factor": result.profit_factor,
+            "avg_trade_pnl": result.avg_trade_pnl,
+            "max_win": result.max_win,
+            "max_loss": result.max_loss,
+            "stop_loss_pct": strategy.stop_loss_pct,
+            "take_profit_pct": strategy.take_profit_pct,
+            "trailing_stop_pct": strategy.trailing_stop_pct,
         })
         db.commit()
         db.refresh(bt)
 
         return bt
+
         
     except HTTPException:
         raise

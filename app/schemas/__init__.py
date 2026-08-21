@@ -43,16 +43,36 @@ class ExchangeAccount(ExchangeAccountBase):
 class SymbolBase(BaseModel):
     inst_id: str
     base_ccy: Optional[str] = None
-    quote_ccy: Optional[str] = None
+    quote_ccy: Optional[str] = "USDT"
+    inst_type: Optional[str] = "SWAP"  # SWAP / SPOT / COMMODITY / STOCK / INDEX
+    category: Optional[str] = "CRYPTO"  # CRYPTO / COMMODITY / STOCK / INDEX / FOREX / CUSTOM
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    exchange_name: Optional[str] = "OKX"
+
+
+class SymbolCreate(SymbolBase):
+    is_custom: Optional[bool] = True
+    is_active: Optional[bool] = True
+
+
+class SymbolUpdate(BaseModel):
+    display_name: Optional[str] = None
+    category: Optional[str] = None
     inst_type: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
 
 
 class Symbol(SymbolBase):
     id: int
-    is_active: bool
+    is_custom: bool = False
+    is_active: bool = True
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
 
 
 class Kline(BaseModel):
@@ -77,13 +97,15 @@ class StrategyBase(BaseModel):
     timeframe: str
     leverage: Optional[float] = None
     monitor_interval_sec: int = Field(default=60, ge=1)
+    stop_loss_pct: Optional[float] = None
+    take_profit_pct: Optional[float] = None
+    trailing_stop_pct: Optional[float] = None
     config_json: str
     created_from_ai: bool = False
 
 
 class StrategyCreate(StrategyBase):
     pass
-
 
 
 class Strategy(StrategyBase):
@@ -98,11 +120,34 @@ class Strategy(StrategyBase):
         from_attributes = True
 
 
+class NotificationConfigBase(BaseModel):
+    channel: str
+    config_json: str
+    is_enabled: bool = False
+
+
+class NotificationConfigCreate(NotificationConfigBase):
+    pass
+
+
+class NotificationConfigSchema(NotificationConfigBase):
+    id: int
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+
+
 class BacktestBase(BaseModel):
     strategy_id: int
     start_ts: Optional[datetime] = None
     end_ts: Optional[datetime] = None
     initial_balance: float = 10000.0
+    fee_rate: float = 0.0
+    slippage_pct: float = 0.0
+
 
 
 class BacktestCreate(BacktestBase):
@@ -144,9 +189,14 @@ class StrategyInstance(BaseModel):
     status: str  # RUNNING/STOPPED
     started_at: Optional[datetime] = None
     stopped_at: Optional[datetime] = None
+    strategy_name: Optional[str] = None
+    symbol_inst_id: Optional[str] = None
+    symbol_display_name: Optional[str] = None
+    symbol_category: Optional[str] = None
 
     class Config:
         from_attributes = True
+
 
 
 class LiveTrade(BaseModel):

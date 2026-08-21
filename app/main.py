@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.db.init_db import init_db
 from app.api import api_router
 from app.workers.live_trading import start_scheduler, shutdown_scheduler
+from app.services.okx_ws import okx_ws_client
 
 
 @asynccontextmanager
@@ -14,12 +15,24 @@ async def lifespan(app: FastAPI):
     init_db()
     # 启动调度器（用于实盘策略执行等）
     start_scheduler()
+    # 启动 OKX WebSocket 行情接收
+    try:
+        await okx_ws_client.start()
+    except Exception as e:
+        print(f"[WS] 启动失败: {e}")
+
     yield
-    # 关闭调度器
+
+    # 关闭 WebSocket 与调度器
+    try:
+        await okx_ws_client.stop()
+    except Exception:
+        pass
     try:
         shutdown_scheduler()
     except Exception:
         pass
+
 
 
 def create_app() -> FastAPI:

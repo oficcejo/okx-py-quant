@@ -11,3 +11,5 @@ httpx
 pandas
 numpy
 apscheduler
+websockets
+

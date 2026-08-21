@@ -19,6 +19,9 @@ interface StrategyRow {
   timeframe: string
   leverage?: number
   monitor_interval_sec: number
+  stop_loss_pct?: number | null
+  take_profit_pct?: number | null
+  trailing_stop_pct?: number | null
   config_json: string
   status: string
   created_from_ai: boolean
@@ -45,7 +48,8 @@ const StrategiesPage: React.FC = () => {
   }
 
   const loadSymbols = () => {
-    api.get('/strategies/symbols/list')
+    api
+      .get('/strategies/symbols/list')
       .then(res => setSymbols(res.data))
       .catch(err => console.error('加载Symbol列表失败', err))
   }
@@ -64,11 +68,14 @@ const StrategiesPage: React.FC = () => {
           description: values.description,
           symbol_id: values.symbol_id,
           timeframe: values.timeframe,
-          leverage: values.leverage,
-          monitor_interval_sec: values.monitor_interval_sec,
+          leverage: values.leverage || 1.0,
+          monitor_interval_sec: values.monitor_interval_sec || 60,
+          stop_loss_pct: values.stop_loss_pct ?? null,
+          take_profit_pct: values.take_profit_pct ?? null,
+          trailing_stop_pct: values.trailing_stop_pct ?? null,
           config_json: values.config_json,
         }
-        
+
         if (editingId) {
           return api.put(`/strategies/${editingId}`, payload)
         } else {
@@ -96,6 +103,9 @@ const StrategiesPage: React.FC = () => {
       timeframe: record.timeframe,
       leverage: record.leverage,
       monitor_interval_sec: record.monitor_interval_sec,
+      stop_loss_pct: record.stop_loss_pct,
+      take_profit_pct: record.take_profit_pct,
+      trailing_stop_pct: record.trailing_stop_pct,
       config_json: record.config_json,
     })
     setModalOpen(true)
@@ -125,190 +135,300 @@ const StrategiesPage: React.FC = () => {
   }
 
   return (
-    <Card
-      title="策略管理"
-      extra={(
-        <Space>
-          <Button
-            type="default"
-            icon={<BuildOutlined />}
-            onClick={() => navigate('/strategies/builder')}
-          >
-            可视化构建器
-          </Button>
-          <Button type="primary" onClick={() => setModalOpen(true)}>
-            手动新建
-          </Button>
-        </Space>
-      )}
-    >
-      <Table
-        loading={loading}
-        rowKey="id"
-        dataSource={items}
-        pagination={{ pageSize: 10 }}
-        columns={[
-          { title: 'ID', dataIndex: 'id', width: 60 },
-          { title: '名称', dataIndex: 'name', width: 160 },
-          { title: '周期', dataIndex: 'timeframe', width: 80 },
-          {
-            title: '状态',
-            dataIndex: 'status',
-            width: 80,
-            render: v => <Tag color={v === 'ACTIVE' ? 'green' : 'default'}>{v}</Tag>,
-          },
-          {
-            title: '来源',
-            dataIndex: 'created_from_ai',
-            width: 80,
-            render: v => (v ? <Tag color="blue">AI</Tag> : <Tag>手动</Tag>),
-          },
-          { title: '创建时间', dataIndex: 'created_at', width: 180 },
-          {
-            title: '操作',
-            width: 180,
-            render: (_, record) => (
-              <Space>
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<EyeOutlined />}
-                  onClick={() => handleView(record)}
-                >
-                  查看
-                </Button>
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<EditOutlined />}
-                  onClick={() => handleEdit(record)}
-                >
-                  编辑
-                </Button>
-                <Popconfirm
-                  title="确定删除此策略？"
-                  description="删除后将无法恢复"
-                  onConfirm={() => handleDelete(record.id)}
-                  okText="确定"
-                  cancelText="取消"
-                >
+    <div style={{ padding: 24 }}>
+      <Card
+        title="策略管理"
+        extra={
+          <Space>
+            <Button
+              type="default"
+              icon={<BuildOutlined />}
+              onClick={() => navigate('/templates')}
+            >
+              📚 经典模版库
+            </Button>
+            <Button
+              type="default"
+              onClick={() => navigate('/optimizer')}
+            >
+              ⚡ 参数寻优
+            </Button>
+            <Button
+              type="default"
+              icon={<BuildOutlined />}
+              onClick={() => navigate('/strategies/builder')}
+            >
+              可视化构建器
+            </Button>
+            <Button type="primary" onClick={() => setModalOpen(true)}>
+              手动新建
+            </Button>
+          </Space>
+        }
+      >
+
+        <Table
+          loading={loading}
+          rowKey="id"
+          dataSource={items}
+          pagination={{ pageSize: 10 }}
+          columns={[
+            { title: 'ID', dataIndex: 'id', width: 60 },
+            { title: '名称', dataIndex: 'name', width: 160 },
+            { title: '周期', dataIndex: 'timeframe', width: 80 },
+            {
+              title: '风控 (止损/止盈/追踪)',
+              width: 200,
+              render: (_, r: StrategyRow) => (
+                <Space size="small" wrap>
+                  {r.stop_loss_pct ? (
+                    <Tag color="red">止损: -{r.stop_loss_pct}%</Tag>
+                  ) : (
+                    <Tag>无止损</Tag>
+                  )}
+                  {r.take_profit_pct ? (
+                    <Tag color="green">止盈: +{r.take_profit_pct}%</Tag>
+                  ) : null}
+                  {r.trailing_stop_pct ? (
+                    <Tag color="orange">追踪: {r.trailing_stop_pct}%</Tag>
+                  ) : null}
+                </Space>
+              ),
+            },
+            {
+              title: '状态',
+              dataIndex: 'status',
+              width: 80,
+              render: v => <Tag color={v === 'ACTIVE' ? 'green' : 'default'}>{v}</Tag>,
+            },
+            {
+              title: '来源',
+              dataIndex: 'created_from_ai',
+              width: 80,
+              render: v => (v ? <Tag color="blue">AI</Tag> : <Tag>手动</Tag>),
+            },
+            {
+              title: '创建时间',
+              dataIndex: 'created_at',
+              width: 170,
+            },
+            {
+              title: '操作',
+              width: 180,
+              render: (_, record) => (
+                <Space>
                   <Button
                     type="link"
                     size="small"
-                    danger
-                    icon={<DeleteOutlined />}
+                    icon={<EyeOutlined />}
+                    onClick={() => handleView(record)}
                   >
-                    删除
+                    查看
                   </Button>
-                </Popconfirm>
-              </Space>
-            ),
-          },
-        ]}
-      />
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<EditOutlined />}
+                    onClick={() => handleEdit(record)}
+                  >
+                    编辑
+                  </Button>
+                  <Popconfirm
+                    title="确定删除此策略？"
+                    description="删除后将无法恢复"
+                    onConfirm={() => handleDelete(record.id)}
+                    okText="确定"
+                    cancelText="取消"
+                  >
+                    <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                      删除
+                    </Button>
+                  </Popconfirm>
+                </Space>
+              ),
+            },
+          ]}
+        />
 
-      <Modal
-        title={editingId ? '编辑策略' : '新建策略'}
-        open={modalOpen}
-        onCancel={handleModalClose}
-        onOk={handleSave}
-        width={800}
-      >
-        <Form form={form} layout="vertical">
-          <Form.Item name="name" label="策略名称" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="description" label="描述">
-            <Input.TextArea rows={2} />
-          </Form.Item>
-          <Space style={{ display: 'flex' }}>
+        <Modal
+          title={editingId ? '编辑策略' : '新建策略'}
+          open={modalOpen}
+          onCancel={handleModalClose}
+          onOk={handleSave}
+          width={800}
+        >
+          <Form form={form} layout="vertical">
+            <Form.Item name="name" label="策略名称" rules={[{ required: true }]}>
+              <Input placeholder="输入策略名称" />
+            </Form.Item>
+            <Form.Item name="description" label="描述">
+              <Input.TextArea rows={2} placeholder="策略详细说明" />
+            </Form.Item>
+            <Space style={{ display: 'flex' }} wrap size="middle">
+              <Form.Item
+                name="symbol_id"
+                label="交易品种"
+                rules={[{ required: true, message: '请选择交易品种' }]}
+              >
+                <Select
+                  showSearch
+                  placeholder="选择交易品种"
+                  style={{ width: 240 }}
+                  optionFilterProp="children"
+                  options={symbols.map(s => ({
+                    value: s.id,
+                    label: `${s.inst_id} - ${s.display_name}`,
+                  }))}
+                />
+              </Form.Item>
+              <Form.Item name="timeframe" label="K线周期" rules={[{ required: true }]}>
+                <Select placeholder="选择周期" style={{ width: 120 }}>
+                  <Select.Option value="1m">1分钟</Select.Option>
+                  <Select.Option value="5m">5分钟</Select.Option>
+                  <Select.Option value="15m">15分钟</Select.Option>
+                  <Select.Option value="30m">30分钟</Select.Option>
+                  <Select.Option value="1H">1小时</Select.Option>
+                  <Select.Option value="4H">4小时</Select.Option>
+                  <Select.Option value="1D">1天</Select.Option>
+                </Select>
+              </Form.Item>
+              <Form.Item name="leverage" label="杠杆倍数">
+                <InputNumber min={1} max={125} placeholder="1" style={{ width: 110 }} />
+              </Form.Item>
+              <Form.Item name="monitor_interval_sec" label="监控周期(秒)" initialValue={60}>
+                <InputNumber min={1} style={{ width: 130 }} />
+              </Form.Item>
+            </Space>
+
+            {/* 风控止损止盈配置 */}
+            <Card type="inner" title="🛡️ 策略风控参数 (可选)" style={{ marginBottom: 16 }}>
+              <Space style={{ display: 'flex' }} size="large" wrap>
+                <Form.Item name="stop_loss_pct" label="止损比例 (%)">
+                  <InputNumber
+                    min={0.1}
+                    max={100}
+                    step={0.5}
+                    placeholder="如: 2.0 代表亏损2%止损"
+                    style={{ width: 180 }}
+                  />
+                </Form.Item>
+                <Form.Item name="take_profit_pct" label="止盈比例 (%)">
+                  <InputNumber
+                    min={0.1}
+                    max={1000}
+                    step={0.5}
+                    placeholder="如: 5.0 代表盈利5%止盈"
+                    style={{ width: 180 }}
+                  />
+                </Form.Item>
+                <Form.Item name="trailing_stop_pct" label="移动追踪止损 (%)">
+                  <InputNumber
+                    min={0.1}
+                    max={100}
+                    step={0.5}
+                    placeholder="如: 1.5 从最高回撤1.5%"
+                    style={{ width: 180 }}
+                  />
+                </Form.Item>
+              </Space>
+            </Card>
+
             <Form.Item
-              name="symbol_id"
-              label="交易品种"
-              rules={[{ required: true, message: '请选择交易品种' }]}
+              name="config_json"
+              label="策略配置 JSON"
+              rules={[{ required: true, message: '请粘贴策略配置 JSON' }]}
             >
-              <Select
-                showSearch
-                placeholder="选择交易品种"
-                style={{ width: 280 }}
-                optionFilterProp="children"
-                filterOption={(input, option) =>
-                  (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                }
-                options={symbols.map(s => ({
-                  value: s.id,
-                  label: `${s.inst_id} - ${s.display_name}`,
-                }))}
+              <Input.TextArea
+                rows={8}
+                placeholder="由 AI 或手动生成的策略配置 JSON"
+                style={{ fontFamily: 'monospace' }}
               />
             </Form.Item>
-            <Form.Item name="timeframe" label="K线周期" rules={[{ required: true }]}>
-              <Select placeholder="选择周期" style={{ width: 120 }}>
-                <Select.Option value="1m">1分钟</Select.Option>
-                <Select.Option value="5m">5分钟</Select.Option>
-                <Select.Option value="15m">15分钟</Select.Option>
-                <Select.Option value="30m">30分钟</Select.Option>
-                <Select.Option value="1H">1小时</Select.Option>
-                <Select.Option value="4H">4小时</Select.Option>
-                <Select.Option value="1D">1天</Select.Option>
-              </Select>
-            </Form.Item>
-            <Form.Item name="leverage" label="杠杆倍数">
-              <InputNumber min={1} max={125} placeholder="1" style={{ width: 120 }} />
-            </Form.Item>
-          </Space>
-          <Form.Item name="monitor_interval_sec" label="监控周期(秒)" initialValue={20}>
-            <InputNumber min={1} style={{ width: 200 }} />
-          </Form.Item>
-          <Form.Item
-            name="config_json"
-            label="策略配置 JSON"
-            rules={[{ required: true, message: '请粘贴策略配置 JSON' }]}
-          >
-            <Input.TextArea rows={10} placeholder="由 AI 或手动生成的策略配置 JSON" />
-          </Form.Item>
-        </Form>
-      </Modal>
+          </Form>
+        </Modal>
 
-      <Modal
-        title="查看策略详情"
-        open={viewModalOpen}
-        onCancel={() => setViewModalOpen(false)}
-        footer={[
-          <Button key="close" onClick={() => setViewModalOpen(false)}>
-            关闭
-          </Button>,
-        ]}
-        width={800}
-      >
-        {viewingStrategy && (
-          <div>
-            <p><strong>ID:</strong> {viewingStrategy.id}</p>
-            <p><strong>名称:</strong> {viewingStrategy.name}</p>
-            <p><strong>描述:</strong> {viewingStrategy.description || '无'}</p>
-            <p><strong>Symbol ID:</strong> {viewingStrategy.symbol_id}</p>
-            <p><strong>周期:</strong> {viewingStrategy.timeframe}</p>
-            <p><strong>杠杆:</strong> {viewingStrategy.leverage || 1}</p>
-            <p><strong>监控周期(秒):</strong> {viewingStrategy.monitor_interval_sec}</p>
-            <p><strong>状态:</strong> {viewingStrategy.status}</p>
-            <p><strong>来源:</strong> {viewingStrategy.created_from_ai ? 'AI生成' : '手动创建'}</p>
-            <p><strong>创建时间:</strong> {viewingStrategy.created_at}</p>
-            <div style={{ marginTop: 16 }}>
-              <strong>策略配置 JSON:</strong>
-              <pre style={{ 
-                background: '#f5f5f5', 
-                padding: 12, 
-                borderRadius: 4,
-                maxHeight: 300,
-                overflow: 'auto'
-              }}>
-                {JSON.stringify(JSON.parse(viewingStrategy.config_json), null, 2)}
-              </pre>
+        <Modal
+          title="查看策略详情"
+          open={viewModalOpen}
+          onCancel={() => setViewModalOpen(false)}
+          footer={[
+            <Button key="close" onClick={() => setViewModalOpen(false)}>
+              关闭
+            </Button>,
+          ]}
+          width={800}
+        >
+          {viewingStrategy && (
+            <div>
+              <p>
+                <strong>ID:</strong> {viewingStrategy.id}
+              </p>
+              <p>
+                <strong>名称:</strong> {viewingStrategy.name}
+              </p>
+              <p>
+                <strong>描述:</strong> {viewingStrategy.description || '无'}
+              </p>
+              <p>
+                <strong>Symbol ID:</strong> {viewingStrategy.symbol_id}
+              </p>
+              <p>
+                <strong>周期:</strong> {viewingStrategy.timeframe}
+              </p>
+              <p>
+                <strong>杠杆:</strong> {viewingStrategy.leverage || 1}
+              </p>
+              <p>
+                <strong>风控配置:</strong>{' '}
+                <Space>
+                  {viewingStrategy.stop_loss_pct ? (
+                    <Tag color="red">止损: -{viewingStrategy.stop_loss_pct}%</Tag>
+                  ) : (
+                    '无止损'
+                  )}
+                  {viewingStrategy.take_profit_pct ? (
+                    <Tag color="green">止盈: +{viewingStrategy.take_profit_pct}%</Tag>
+                  ) : (
+                    '无止盈'
+                  )}
+                  {viewingStrategy.trailing_stop_pct ? (
+                    <Tag color="orange">追踪: {viewingStrategy.trailing_stop_pct}%</Tag>
+                  ) : null}
+                </Space>
+              </p>
+              <p>
+                <strong>监控周期(秒):</strong> {viewingStrategy.monitor_interval_sec}
+              </p>
+              <p>
+                <strong>状态:</strong> {viewingStrategy.status}
+              </p>
+              <p>
+                <strong>来源:</strong> {viewingStrategy.created_from_ai ? 'AI生成' : '手动创建'}
+              </p>
+              <p>
+                <strong>创建时间:</strong> {viewingStrategy.created_at}
+              </p>
+              <div style={{ marginTop: 16 }}>
+                <strong>策略配置 JSON:</strong>
+                <pre
+                  style={{
+                    background: '#f5f5f5',
+                    padding: 12,
+                    borderRadius: 4,
+                    maxHeight: 300,
+                    overflow: 'auto',
+                  }}
+                >
+                  {JSON.stringify(JSON.parse(viewingStrategy.config_json), null, 2)}
+                </pre>
+              </div>
             </div>
-          </div>
-        )}
-      </Modal>
-    </Card>
+          )}
+        </Modal>
+      </Card>
+    </div>
   )
 }
 
 export default StrategiesPage
+

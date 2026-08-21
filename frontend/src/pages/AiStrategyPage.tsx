@@ -81,9 +81,12 @@ const AiStrategyPage: React.FC = () => {
           timeframe: data.timeframe || '1H',
           leverage: data.leverage || 1,
           monitor_interval_sec: data.monitor_interval_sec || 60,
+          stop_loss_pct: data.stop_loss_pct ?? null,
+          take_profit_pct: data.take_profit_pct ?? null,
+          trailing_stop_pct: data.trailing_stop_pct ?? null,
           config_json: cfg,
         })
-        message.success('AI 策略配置生成成功！可检查确认后保存')
+        message.success('AI 策略配置生成成功！已提取策略与风控参数')
       })
       .catch(err => {
         message.error('生成失败: ' + (err.response?.data?.detail || err.message))
@@ -103,6 +106,9 @@ const AiStrategyPage: React.FC = () => {
           timeframe: values.timeframe,
           leverage: values.leverage || 1.0,
           monitor_interval_sec: values.monitor_interval_sec || 60,
+          stop_loss_pct: values.stop_loss_pct ?? null,
+          take_profit_pct: values.take_profit_pct ?? null,
+          trailing_stop_pct: values.trailing_stop_pct ?? null,
           config_json: values.config_json,
           created_from_ai: true,
         })
@@ -121,7 +127,7 @@ const AiStrategyPage: React.FC = () => {
         })
       })
       .catch(err => {
-        message.error('保存失败: ' + (err.response?.data?.detail || err.message))
+        message.error('创建策略失败: ' + (err.response?.data?.detail || err.message))
       })
       .finally(() => setSaving(false))
   }
@@ -249,11 +255,51 @@ const AiStrategyPage: React.FC = () => {
               <Input.TextArea rows={2} placeholder="策略详细描述" />
             </Form.Item>
 
+            {/* 止损止盈参数 */}
+            <Card type="inner" title="🛡️ 策略风控设置 (自动由 AI 建议或手动微调)" style={{ marginBottom: 16 }}>
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Form.Item name="stop_loss_pct" label="止损比例 (%)">
+                    <InputNumber
+                      min={0.1}
+                      max={100}
+                      step={0.5}
+                      placeholder="如: 2.0 代表2%"
+                      style={{ width: '100%' }}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="take_profit_pct" label="止盈比例 (%)">
+                    <InputNumber
+                      min={0.1}
+                      max={1000}
+                      step={0.5}
+                      placeholder="如: 5.0 代表5%"
+                      style={{ width: '100%' }}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="trailing_stop_pct" label="移动追踪止损 (%)">
+                    <InputNumber
+                      min={0.1}
+                      max={100}
+                      step={0.5}
+                      placeholder="如: 1.5 从高点回撤1.5%"
+                      style={{ width: '100%' }}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </Card>
+
             <Form.Item
               name="config_json"
               label="策略规则 JSON (严格遵守买入/卖出条件组规范)"
               rules={[{ required: true, message: '请确认策略配置 JSON' }]}
             >
+
               <Input.TextArea
                 rows={8}
                 value={config}
